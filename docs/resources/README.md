@@ -1,5 +1,14 @@
 # Resources
 
+## Website offer — go-live & payment
+
+Copy for groundworkdental.com so the public offer matches ops.
+
+| File | Use |
+|------|-----|
+| [WEBSITE_OFFER_GO_LIVE.md](./WEBSITE_OFFER_GO_LIVE.md) | Share with marketing-site edits (pricing / FAQ / how-it-works) |
+| [../onboarding/GO_LIVE_AND_PAYMENT.md](../onboarding/GO_LIVE_AND_PAYMENT.md) | Operator policy (internal) |
+
 ## Dental online presence checklist
 
 Shareable cheat sheet for dental practices (Groundwork branding on the wrapper; neutral checklist items).

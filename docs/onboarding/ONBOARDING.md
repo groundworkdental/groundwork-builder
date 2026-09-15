@@ -427,26 +427,32 @@ Work through this list after getting Manager access:
 
 ## Phase 7 — DNS cutover and go-live
 
+> **Payment gate:** See [GO_LIVE_AND_PAYMENT.md](./GO_LIVE_AND_PAYMENT.md). Ladder: free preview on Groundwork → optional **$500 deposit** for their CF + domain as-is → **$2,000 total** unlocks 30-day revisions.  
+> Disconnecting the GitHub repo does **not** take the site down. Don’t move Pages into their CF until the deposit (or full payment) clears.
+
 ### Before cutting DNS
 
-- [ ] Preview site reviewed and approved (send them the `<slug>.groundworkdental.com` URL)
+- [ ] Preview site reviewed and approved (Groundwork / pages.dev URL)
 - [ ] Ship gates passed
-- [ ] GBP website link ready to update
+- [ ] **$500 deposit or full $2,000 posted** before their CF + custom domain
 - [ ] Old site backup saved
-- [ ] Domain registrar login in hand
+- [ ] Domain registrar / Cloudflare DNS access in hand
+- [ ] GBP website link — prefer **after full payment** (soft leverage if only deposit is paid)
 
 ### DNS records to set
 
-Point the domain to Cloudflare Pages (or wherever the site is deployed). Exact records depend on the hosting setup — check `public/` or `deploy/` for the deployed URL and use that as the CNAME target.
+1. In Cloudflare Pages → **Custom domains** → add `example.com` and `www` **first** (a raw CNAME with no Pages association returns 522).
+2. If DNS is on this Cloudflare account, CF creates the records. If not, move nameservers (apex) or CNAME `www` to the project’s `*.pages.dev` host.
+3. A `slug-xxxx.pages.dev` suffix is fine when the clean name is taken — production is the custom domain.
 
-Typical Cloudflare Pages setup:
+Typical records (after Custom domains is set up):
 
 ```
-CNAME  @    <slug>.pages.dev   (or the assigned Pages domain)
+CNAME  @    <slug>.pages.dev   (or the assigned Pages domain — CF may use its own apex target)
 CNAME  www  <slug>.pages.dev
 ```
 
-DNS propagation: 5 min to a few hours depending on TTL.
+DNS propagation: 5 min to a few hours depending on TTL. SSL is automatic.
 
 ### Immediately after DNS propagates
 
@@ -458,7 +464,10 @@ curl -I https://their-domain.com
 npm run audit -- --url https://their-domain.com --source manual
 ```
 
-- [ ] Update GBP website link to the real domain (`business.google.com` → Info → Website)
+- [ ] Update GBP website link — prefer after **full** $2,000
+- [ ] If deposit-only: no revision rounds (critical fixes only); remaining balance still due
+- [ ] If full payment: revision window starts on **first feedback** after pay, then +30 days (see go-live policy)
+- [ ] Transfer Pages into **their** Cloudflare at deposit or full pay — not before
 
 ---
 

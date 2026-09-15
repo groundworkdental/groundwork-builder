@@ -12,6 +12,8 @@ Single map of how a dental practice moves from prospect to active client. Use th
 | Sourcing production ops (metros, campaign) | [RUNBOOK.md](../sourcing/RUNBOOK.md) |
 | Grader / public audit tool plan | [GRADER_PLAN.md](../GRADER_PLAN.md) |
 | GBP API setup (post-sign onboarding) | [gbp-setup-walkthrough.md](../gbp/gbp-setup-walkthrough.md) |
+| Go-live vs payment (ops policy) | [GO_LIVE_AND_PAYMENT.md](../onboarding/GO_LIVE_AND_PAYMENT.md) |
+| Website offer copy (marketing sync) | [WEBSITE_OFFER_GO_LIVE.md](../resources/WEBSITE_OFFER_GO_LIVE.md) |
 | Public marketing artifacts | [resources/README.md](../resources/README.md) |
 
 ---
@@ -89,7 +91,7 @@ Phases ③ are documented in [ARCHITECTURE.html](../architecture/ARCHITECTURE.ht
 | 9 | Discovery / sales call | **Contacted** | accounts | Manual (`setAccountLifecycle`) | ⚡ | `d1.js` |
 | 10 | Client signed | **Signed** | accounts | Contract / payment | ⚡ Manual | `setAccountLifecycle()` |
 | 11 | Onboarding | **Onboarding** | Accounts | Post-sign checklist | ⚡ GBP + intake | [ONBOARDING.md](../onboarding/ONBOARDING.md) |
-| 12 | Live on client domain | **Live** | Accounts + Builds | DNS cutover | ⚡ Manual | [ONBOARDING.md §7](../onboarding/ONBOARDING.md#phase-7--dns-cutover-and-go-live) |
+| 12 | Live on client domain | **Live** | Accounts + Builds | DNS cutover (after payment by default) | ⚡ Manual | [ONBOARDING.md §7](../onboarding/ONBOARDING.md#phase-7--dns-cutover-and-go-live) · [GO_LIVE_AND_PAYMENT.md](../onboarding/GO_LIVE_AND_PAYMENT.md) |
 | 13 | Active / support | **Active** | Accounts | Ongoing | ⚡ Manual | — |
 | 14 | Churn / offboard | **Churned** | Accounts | Engagement ends | ⚡ GBP offboarding | [gbp-offboarding.md](../gbp/gbp-offboarding.md) |
 
@@ -184,6 +186,7 @@ audit-summary.html CTA
 2. ~~**Audit-on-promotion**~~ — `promote.js` runs `audit-site.js` unless `--no-audit` (METHODOLOGY §6). Warns when promoting non-Prime / non-A–B.
 3. **Re-audit automation** — `Re-audit Due` is set at handoff; calendar automation not wired yet.
 4. **Keyword rank module** — Baseline ranks are manual until GRADER ships ([GRADER_PLAN.md](../GRADER_PLAN.md)).
+5. **Internal design template tracking** — Builds do not yet store which catalog `--reference` / archetype template produced the site. Needed for ops filtering (“show all klinik builds”) and hard diversity enforcement. Tracked on [PIPELINE.md](../PIPELINE.md) Pending.
 
 ### Recently resolved
 
@@ -210,7 +213,8 @@ docs/
 │   └── RUNBOOK.md              ← how to run metros / campaign
 ├── gbp/                        ← post-sign runbooks (phase ④)
 ├── onboarding/
-│   └── HANDOFF.md              ← baseline capture at preview-live (phase ④)
+│   ├── HANDOFF.md              ← baseline capture at preview-live (phase ④)
+│   └── GO_LIVE_AND_PAYMENT.md  ← payment vs domain cutover policy
 ├── resources/                  ← public lead magnets
 ├── design/                     ← brand + generated-site rules
 ├── engineering/                ← IA/SEO/build conventions
