@@ -119,6 +119,60 @@ drift.
 
 ---
 
+## Tailwind v4 theming
+
+Colours live in the `@theme` block of `src/styles/tokens.css`. `tailwind.config.mjs`
+carries none. Context classes (`.section-dark`) override the same `--color-*`
+names, which is what lets a band flip its palette with one class.
+
+Three things here are counter-intuitive and all of them look correct in the CSS.
+Only `getComputedStyle` tells them apart.
+
+### `<alpha-value>` is v3 syntax and fails silently under v4
+
+`rgb(var(--c-primary) / <alpha-value>)` in the JS config compiles to
+`rgb(var(--c-primary) / 1)`. Every opacity modifier becomes fully opaque, with
+no warning.
+
+### A custom property resolves `var()` where it is DECLARED
+
+The tempting indirection — `--color-brand-primary: rgb(var(--c-primary))`, then
+flip `--c-primary` per context — does not work. The inner `var()` is
+substituted at the declaring element, so the root value is baked in and
+inherited. Measured in a browser: plain `text-brand-primary` read
+`rgb(27,58,92)` inside the dark context, identical to light, while the opacity
+variant correctly read `rgb(71,133,201)`. Half the utilities honour the theme
+and half don't.
+
+**Override `--color-*` directly in the context class.**
+
+### Known limit: opacity modifiers don't follow a context switch
+
+With a literal hex in `@theme`, Tailwind constant-folds
+`bg-brand-primary/10` to `#1b3a5c1a`, so it keeps the light value inside
+`.section-dark`. Every alternative is worse:
+
+| `@theme` value | Plain utility | Opacity modifier |
+|---|---|---|
+| `rgb(var(--c-x))` | ❌ baked at root | ✅ dynamic |
+| `var(--p-x)` | — | ❌ opacity dropped entirely |
+| **literal hex** ← shipped | ✅ honours context | ❌ folded |
+
+Plain utilities are the overwhelming majority, so the literal wins. Inside a
+dark band, use an explicit token (`text-brand-on-dark`) rather than an
+opacity-modified brand colour.
+
+### Moving colour values breaks the checks that read them
+
+`verify-build.js`'s palette check and the generator test both parsed hex out of
+`tailwind.config.mjs`. Against a tokenised config that regex matches nothing,
+every role is skipped and **the AA gate passes vacuously** — the test literally
+reported "primary undefined, accent undefined both ≥ 4.5:1". Both now read
+`tokens.css` and assert the values were found. If colour values move again,
+move these with them.
+
+---
+
 ## Google
 
 ### Business Profile API is gated; there is no API key
