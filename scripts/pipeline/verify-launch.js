@@ -24,6 +24,15 @@
  *                       index.html with a 200 for every unmatched route.
  *                       /anything-at-all/ returned the full homepage. Every
  *                       typo was an indexable duplicate.
+ *   dirty working tree  a deploy ships what is on disk, not what is in git.
+ *                       One client repo had 33 uncommitted files diverging
+ *                       from production; this repo had 99. If several people
+ *                       or agents share a checkout, a deploy can carry
+ *                       someone else's half-finished work.
+ *   mismatched crops    a replaced headshot at a different aspect ratio to
+ *                       its siblings is glaring in a team grid, and a
+ *                       thumbnail that disagrees with its parent makes
+ *                       responsive <picture> swaps jump.
  *
  * The through-line: an unset value renders as broken output rather than as
  * absent output. Templates must guard, and this catches them when they don't.
@@ -39,6 +48,15 @@ import { resolve, join, relative } from 'node:path';
 const results = [];
 const pass = (name, detail = '') => results.push({ ok: true, name, detail });
 const fail = (name, detail) => results.push({ ok: false, name, detail });
+/**
+ * Advisory: surfaced, but does not block the launch.
+ *
+ * Reserved for findings a human has to judge. A dirty working tree may be a
+ * legitimate mid-build tweak or may be someone else's unfinished work; a crop
+ * mismatch may be deliberate. Failing on either would train people to pass
+ * --force, which costs more than the check is worth.
+ */
+const warn = (name, detail) => results.push({ ok: true, warn: true, name, detail });
 
 const exists = (p) => access(p).then(() => true).catch(() => false);
 const readMaybe = (p) => readFile(p, 'utf8').catch(() => null);
@@ -220,6 +238,136 @@ async function checkWranglerVars(clientDir) {
 }
 
 
+
+/**
+ * A deploy ships the working tree, not the last commit.
+ *
+ * "git push" and "deploy" are different risk levels: push ships committed
+ * history, deploy builds whatever is physically on disk — including edits
+ * nobody has reviewed, and including other people's if a checkout is shared.
+ * Warn rather than fail: mid-build local tweaks are legitimate, walking past
+ * 33 unexplained files is not.
+ */
+async function checkWorkingTree(clientDir) {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+  let stdout;
+  try {
+    ({ stdout } = await run('git', ['status', '--porcelain'], { cwd: clientDir }));
+  } catch {
+    pass('working tree', 'not a git repo — nothing to compare');
+    return;
+  }
+  const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) {
+    pass('working tree', 'clean — the build matches committed history');
+    return;
+  }
+  warn(
+    'working tree',
+    `${lines.length} uncommitted change(s); a deploy ships these. ` +
+      `If they are not yours, find out whose before deploying: ` +
+      lines.slice(0, 3).map((l) => l.split(/\s+/).pop()).join(', ') +
+      (lines.length > 3 ? ` (+${lines.length - 3} more)` : ''),
+  );
+}
+
+/**
+ * Images in a set must share an aspect ratio, and a size variant must match
+ * its parent.
+ *
+ * A headshot swapped in at a different crop is obvious in a team grid, and a
+ * -480 variant that disagrees with its full-size parent makes responsive
+ * swaps jump on resize. Both are cheap to measure and easy to miss by eye.
+ *
+ * Reads intrinsic dimensions straight from the file headers so it needs no
+ * image library.
+ */
+function imageSize(buf) {
+  // PNG: IHDR at byte 16
+  if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) {
+    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+  }
+  // JPEG: walk segments to the first SOF
+  if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+    let i = 2;
+    while (i < buf.length - 9) {
+      if (buf[i] !== 0xff) { i++; continue; }
+      const marker = buf[i + 1];
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+        return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
+      }
+      i += 2 + buf.readUInt16BE(i + 2);
+    }
+    return null;
+  }
+  // WebP (VP8X / VP8 / VP8L)
+  if (buf.length > 30 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') {
+    const fmt = buf.toString('ascii', 12, 16);
+    if (fmt === 'VP8X') return { w: (buf.readUIntLE(24, 3) & 0xffffff) + 1, h: (buf.readUIntLE(27, 3) & 0xffffff) + 1 };
+    if (fmt === 'VP8 ') return { w: buf.readUInt16LE(26) & 0x3fff, h: buf.readUInt16LE(28) & 0x3fff };
+    if (fmt === 'VP8L') {
+      const b = buf.readUInt32LE(21);
+      return { w: (b & 0x3fff) + 1, h: ((b >> 14) & 0x3fff) + 1 };
+    }
+  }
+  return null;
+}
+
+async function checkImageSets(clientDir) {
+  const { readdir: rd, readFile: rf } = await import('node:fs/promises');
+  const dirs = ['public/images/doctors', 'public/images/team', 'public/images/staff'];
+  const problems = [];
+  let checked = 0;
+
+  for (const rel of dirs) {
+    const dir = join(clientDir, rel);
+    let files;
+    try { files = await rd(dir); } catch { continue; }
+
+    const sizes = new Map();
+    for (const f of files) {
+      if (!/\.(png|jpe?g|webp)$/i.test(f)) continue;
+      const size = imageSize(await rf(join(dir, f)));
+      if (size?.w && size?.h) sizes.set(f, { ...size, ratio: size.w / size.h });
+    }
+    if (sizes.size < 2) continue;
+    checked += sizes.size;
+
+    // A variant (name-480.webp) must match its parent's ratio.
+    for (const [name, s] of sizes) {
+      const parent = name.replace(/-\d+(\.[a-z]+)$/i, '$1');
+      if (parent === name) continue;
+      const p = sizes.get(parent);
+      if (p && Math.abs(p.ratio - s.ratio) > 0.02) {
+        problems.push(`${rel}/${name} ${s.ratio.toFixed(2)} vs parent ${p.ratio.toFixed(2)}`);
+      }
+    }
+
+    // Full-size siblings should share one crop convention.
+    const fulls = [...sizes.entries()].filter(([n]) => !/-\d+\.[a-z]+$/i.test(n));
+    if (fulls.length > 1) {
+      const ratios = fulls.map(([, s]) => s.ratio);
+      const spread = Math.max(...ratios) - Math.min(...ratios);
+      if (spread > 0.02) {
+        problems.push(
+          `${rel}: siblings disagree on crop (${fulls.map(([n, s]) => `${n} ${s.ratio.toFixed(2)}`).join(', ')})`,
+        );
+      }
+    }
+  }
+
+  if (!checked) {
+    pass('image sets', 'no multi-image sets to compare');
+    return;
+  }
+  problems.length
+    ? warn('image sets', problems.join('; '))
+    : pass('image sets', `${checked} image(s) share a consistent crop`);
+}
+
+
 /**
  * A built 404.html is what makes Pages answer 404 at all.
  *
@@ -274,15 +422,20 @@ async function main() {
   checkPlaceholders(pages, robotsTxt);
   await checkSitemapVsRedirects(distDir, pages);
   await check404(distDir);
+  await checkWorkingTree(clientDir);
+  await checkImageSets(clientDir);
   await checkWranglerVars(clientDir);
 
   const failed = results.filter((r) => !r.ok);
+  const warned = results.filter((r) => r.warn);
   for (const r of results) {
-    console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? ` — ${r.detail}` : ''}`);
+    const label = !r.ok ? 'FAIL' : r.warn ? 'WARN' : 'PASS';
+    console.log(`${label}  ${r.name}${r.detail ? ` — ${r.detail}` : ''}`);
   }
   console.log(
-    `\n${results.length - failed.length}/${results.length} launch gates passed ` +
-      `(${pages.length} pages scanned)`,
+    `\n${results.length - failed.length - warned.length}/${results.length - warned.length} ` +
+      `launch gates passed (${pages.length} pages scanned)` +
+      (warned.length ? `, ${warned.length} advisory` : ''),
   );
   process.exit(failed.length ? 1 : 0);
 }
