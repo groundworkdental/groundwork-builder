@@ -1,8 +1,0 @@
-# Replace https://example.com with your production origin (must match astro.config.mjs `site` and src/config/site.ts `url`).
-User-agent: *
-Allow: /
-
-Disallow: /thank-you/
-Disallow: /referral/
-
-Sitemap: https://example.com/sitemap-index.xml
