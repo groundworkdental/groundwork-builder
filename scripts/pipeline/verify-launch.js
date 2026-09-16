@@ -20,6 +20,10 @@
  *   redirecting sitemap a page kept its route while _redirects also matched
  *                       it, so the sitemap advertised a URL that 301s.
  *                       Search Console reports these as "Page with redirect".
+ *   soft 404s           no 404.html in the build, so Cloudflare Pages served
+ *                       index.html with a 200 for every unmatched route.
+ *                       /anything-at-all/ returned the full homepage. Every
+ *                       typo was an indexable duplicate.
  *
  * The through-line: an unset value renders as broken output rather than as
  * absent output. Templates must guard, and this catches them when they don't.
@@ -215,6 +219,32 @@ async function checkWranglerVars(clientDir) {
   );
 }
 
+
+/**
+ * A built 404.html is what makes Pages answer 404 at all.
+ *
+ * With none, it falls back to index.html with a 200 for unmatched routes, so
+ * the site silently accrues unlimited soft-404 duplicates of its homepage.
+ * The failure is invisible in a browser — the page you get back looks right.
+ */
+async function check404(distDir) {
+  const html = await readMaybe(join(distDir, '404.html'));
+  if (!html) {
+    fail(
+      '404 page',
+      'no dist/404.html — Cloudflare Pages will serve index.html with a 200 ' +
+        'for every unmatched route, making each one an indexable duplicate ' +
+        'of the homepage. Add src/pages/404.astro.',
+    );
+    return;
+  }
+  if (!/noindex/i.test(html)) {
+    fail('404 page', 'dist/404.html is missing a noindex directive');
+    return;
+  }
+  pass('404 page', 'built and noindexed');
+}
+
 // ---------------------------------------------------------------------------
 
 async function main() {
@@ -243,6 +273,7 @@ async function main() {
   checkEmptyHrefs(pages);
   checkPlaceholders(pages, robotsTxt);
   await checkSitemapVsRedirects(distDir, pages);
+  await check404(distDir);
   await checkWranglerVars(clientDir);
 
   const failed = results.filter((r) => !r.ok);

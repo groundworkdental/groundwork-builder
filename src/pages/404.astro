@@ -1,0 +1,57 @@
+---
+/**
+ * Every site from this template needs a built 404.html.
+ *
+ * Without one, Cloudflare Pages falls back to serving index.html with a 200
+ * for any unmatched route — so every typo, retired URL and crawler probe
+ * becomes an indexable duplicate of the homepage. Google classifies those as
+ * soft 404s. This shipped on a live client site and went unnoticed because
+ * the page it returned looked perfectly fine.
+ */
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { site, bookingCta } from '../config/site';
+---
+
+<BaseLayout
+  title={`Page not found — ${site.name}`}
+  description="That page doesn't exist. Find our services, doctors, and contact details here."
+  noindex={true}
+>
+  <section class="py-24 md:py-32">
+    <div class="max-w-3xl mx-auto px-6">
+      <p class="text-sm font-semibold uppercase tracking-[0.18em] text-[color:rgb(var(--c-dim))] mb-5">
+        404
+      </p>
+      <h1 class="font-serif text-4xl md:text-6xl font-normal tracking-tight text-[color:rgb(var(--c-fg))] mb-6">
+        We couldn't find that page
+      </h1>
+      <p class="text-lg text-[color:rgb(var(--c-dim))] leading-relaxed max-w-xl">
+        The link may be out of date, or the address slightly off. Here's where
+        most people are headed.
+      </p>
+
+      <nav class="mt-12 grid gap-x-10 gap-y-3 sm:grid-cols-2 max-w-xl" aria-label="Popular pages">
+        {[
+          ['Our doctors', '/about'],
+          ['All services', '/services'],
+          ['FAQ', '/faq'],
+          ['Contact', '/contact'],
+        ].map(([label, href]) => (
+          <a
+            href={href}
+            class="py-2 text-[color:rgb(var(--c-fg))] hover:text-[color:rgb(var(--c-accent))] transition-colors border-b border-[color:rgb(var(--c-hair))]"
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
+
+      <a
+        href={bookingCta.href}
+        class="inline-flex items-center justify-center mt-12 px-8 py-4 rounded-lg bg-[color:rgb(var(--c-primary))] text-[color:rgb(var(--c-on-primary))] font-semibold text-sm hover:opacity-90 transition-opacity"
+      >
+        {bookingCta.label}
+      </a>
+    </div>
+  </section>
+</BaseLayout>

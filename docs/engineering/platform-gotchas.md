@@ -55,6 +55,20 @@ http.request.uri.path)`, 301, preserve query string. The path expression
 matters: without it every www URL lands on the homepage. Preserve query string
 matters too, or GBP's UTM parameters are stripped.
 
+### No `404.html` means soft 404s, not 404s
+
+If the build has no `404.html`, Pages falls back to serving `index.html` with a
+**200** for every unmatched route. `/anything-at-all/` returns the full
+homepage, successfully. Nothing looks broken in a browser, which is why this
+survived a launch — it was found only when a removed page kept answering 200
+after its route stopped building.
+
+Google classifies these as soft 404s, and the site accrues unlimited indexable
+duplicates of its homepage.
+
+**Rule:** ship `src/pages/404.astro`, noindexed. `verify-launch.js` checks both
+that it builds and that it carries the directive.
+
 ### Account and role traps
 
 - A zone may live in a **client's or their MSP's** Cloudflare account, not ours.
