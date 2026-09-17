@@ -135,14 +135,40 @@ function checkEmptyHrefs(pages) {
   pass('empty hrefs', 'no tel:/mailto:/empty href placeholders');
 }
 
-/** Scaffold text that must never reach a patient or a crawler. */
+/**
+ * Scaffold text that must never reach a patient or a crawler.
+ *
+ * Every pattern here is deliberately narrow. An earlier version flagged the
+ * bare words TODO, TBD and "lorem ipsum" anywhere in the output, which
+ * produced three false positives on the first real site it ran against:
+ *
+ *   "Real content, not lorem ipsum"          — sales copy, a selling point
+ *   "Still TBD. Address and hours are on..." — accurate prose about a phone
+ *   "Phone and official logo remain TBD"     — a genuine status note
+ *
+ * A gate that cries wolf on legitimate prose gets muted, and then it misses
+ * the real thing. So match the SHAPE of scaffolding — a comment, a bracketed
+ * stub, an unreplaced token, a known placeholder literal — not vocabulary
+ * that normal writing shares with it.
+ */
 const PLACEHOLDERS = [
+  // The scaffold origin: a site shipped robots.txt pointing at example.com.
   ['example.com', /\bexample\.com\b/i],
-  ['lorem ipsum', /\blorem ipsum\b/i],
-  ['unreplaced token', /\{\{[^}]+\}\}/],
-  ['TODO/TBD', /\b(TODO|TBD)\b/],
-  // Only a CTA whose own label says it does not work — prose may legitimately
-  // say "online booking is coming soon", a button saying it may not.
+  // Unreplaced template tokens.
+  ['unreplaced token', /\{\{[^}]{1,60}\}\}/],
+  // Placeholder literals we ship in scaffolds. G-XXXXXXXXXX reached a live
+  // site and was then faithfully reported by our own audit tool as
+  // "GA4 script detected (G-XXXXXXXXXX)" in client-facing collateral.
+  ['placeholder literal', /G-X{4,}|\[PHONE\]|\[EMAIL\]|\[ADDRESS\]|YOUR_[A-Z_]{3,}/],
+  // Authoring notes left in markup — the shape, not the word. This is what
+  // caught a blog post published with nothing but section stubs.
+  ['authoring comment', /<!--\s*(TODO|TBD|FIXME|XXX)\b/i],
+  // Bracketed writing prompts: "[Write an introduction addressing...]".
+  ['bracketed stub', /\[(Write|Add|Insert|Describe|Section)\b[^\]]{6,120}\]/i],
+  // Lorem only when it runs as actual filler prose, not when a sentence
+  // mentions it. Three or more consecutive latin filler words.
+  ['lorem filler', /\blorem ipsum dolor\b/i],
+  // A CTA whose own label says it does not work.
   ['dead CTA label', /<a\b[^>]*>[^<]*\bcoming soon\b[^<]*<\/a>/i],
 ];
 
@@ -220,11 +246,20 @@ async function checkWranglerVars(clientDir) {
     return;
   }
   if (!/^\s*\[vars\]/m.test(toml)) {
-    fail(
+    // Advisory, not fatal: whether this matters depends on how the project
+    // deploys and where its values come from. On Cloudflare's own build
+    // system a wrangler.toml supersedes dashboard variables, so a PUBLIC_*
+    // set there is silently dropped — that cost three builds on one site.
+    // But a project deployed with a local `wrangler pages deploy` never uses
+    // either mechanism (its build reads .env or committed config), and a
+    // value committed to source needs no [vars] at all. Failing here would
+    // flag correct setups, and a gate that flags correct setups gets muted.
+    warn(
       'wrangler vars',
-      'wrangler.toml exists with no [vars] block. Pages will read build config ' +
-        'from this file and ignore dashboard variables, so any PUBLIC_* value ' +
-        'set there is silently dropped.',
+      'wrangler.toml has no [vars] block. If this site relies on PUBLIC_* at ' +
+        'BUILD time and is built by Cloudflare, those values must be declared ' +
+        'here — dashboard variables are ignored when this file exists. ' +
+        'Not a problem if the values are committed or the site deploys locally.',
     );
     return;
   }
