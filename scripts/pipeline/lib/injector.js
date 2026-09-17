@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { glob } from 'glob';
 import { DEFAULT_HOURS, DEFAULT_COLORS } from './schema.js';
 import { esc } from './utils.js';
-import { ensureContrast } from './contrast.js';
+import { ensureContrast, validatePalette } from './contrast.js';
 import { upsertManagedFile } from './managed-file.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -66,7 +66,7 @@ const CLONE_EXCLUDE = new Set([
  * @param {string} outputDir - Absolute path to the target directory.
  * @param {object} [preset]  - Loaded vertical preset (from preset-loader).
  */
-export async function injectTemplate(data, outputDir, preset = null, design = null) {
+export async function injectTemplate(data, outputDir, preset = null, design = null, opts = {}) {
   console.log(`[injector] Cloning template into ${outputDir}`);
   await cloneTemplate(TEMPLATE_ROOT, outputDir);
 
@@ -80,7 +80,7 @@ export async function injectTemplate(data, outputDir, preset = null, design = nu
   await injectSiteConfig(data, outputDir, preset);
 
   console.log('[injector] Injecting navigation');
-  await injectNavigation(data, outputDir);
+  await injectNavigation(data, outputDir, buildLedgerRouteMap(opts.architecture, data));
 
   console.log('[injector] Injecting Tailwind config');
   await injectTailwindConfig(data, outputDir);
@@ -99,6 +99,9 @@ export async function injectTemplate(data, outputDir, preset = null, design = nu
 
   console.log('[injector] Replacing page placeholders');
   await injectPagePlaceholders(data, outputDir, design);
+
+  console.log('[injector] Linting colour tokens');
+  await lintColorTokens(outputDir);
 
   console.log('[injector] Done.');
 }
@@ -155,6 +158,60 @@ async function lintGeneratedComponentPaths(outputDir) {
       `Fix the offending stub before re-running. (Other depths silently fail and the section renders empty.)`
     );
   }
+}
+
+/**
+ * Every `brand-*` / `surface-*` utility used in a template must resolve to a
+ * token the generated Tailwind config actually defines.
+ *
+ * Tailwind emits nothing for an unknown class rather than failing, so a stale
+ * name degrades silently: `GalleryGrid.astro` styled its active filter pill
+ * `bg-brand-navy text-white`, and because `brand-navy` was never a token the
+ * background vanished and white text rendered on a near-white page at 1.07:1.
+ * Nothing caught it until an axe run, several phases later.
+ *
+ * Warns rather than throws — a colour that doesn't resolve is a visual defect,
+ * not a broken build, and failing the run would be a worse trade.
+ */
+async function lintColorTokens(outputDir) {
+  let config;
+  try { config = await readFile(resolve(outputDir, 'tailwind.config.mjs'), 'utf8'); }
+  catch { return; }
+
+  // Collect the leaf keys defined under each custom namespace.
+  const defined = new Set();
+  for (const ns of ['brand', 'surface']) {
+    const block = config.match(new RegExp(`${ns}:\\s*\\{([\\s\\S]*?)\\}`));
+    if (!block) continue;
+    for (const m of block[1].matchAll(/['"]?([a-zA-Z0-9_-]+)['"]?\s*:/g)) {
+      defined.add(`${ns}-${m[1]}`);
+    }
+  }
+  if (defined.size === 0) return;
+
+  const files = await glob('src/**/*.{astro,ts,js}', { cwd: outputDir, absolute: true });
+  const offenders = new Map();
+  const USED = /\b(?:bg|text|border|ring|fill|stroke|from|via|to|decoration|outline|shadow)-((?:brand|surface)-[a-z0-9]+(?:-[a-z0-9]+)*)/g;
+
+  for (const file of files) {
+    let content;
+    try { content = await readFile(file, 'utf8'); } catch { continue; }
+    for (const m of content.matchAll(USED)) {
+      // Strip Tailwind opacity suffixes (`bg-brand-primary/80`).
+      const token = m[1].split('/')[0];
+      if (defined.has(token)) continue;
+      if (!offenders.has(token)) offenders.set(token, new Set());
+      offenders.get(token).add(relative(outputDir, file));
+    }
+  }
+
+  if (offenders.size === 0) return;
+  console.warn(`[injector] ${offenders.size} colour token(s) used in templates but not defined in tailwind.config.mjs:`);
+  for (const [token, where] of offenders) {
+    console.warn(`    ✗ ${token} — ${[...where].slice(0, 3).join(', ')}`);
+  }
+  console.warn(`    Tailwind emits nothing for these, so paired text/background colours will not render as intended.`);
+  console.warn(`    Defined: ${[...defined].join(', ')}`);
 }
 
 async function cloneTemplate(srcRoot, destRoot, finalDestRoot = null) {
@@ -397,14 +454,14 @@ export const personSchemas = doctors.map((doc) => ({
 // navigation.ts
 // ---------------------------------------------------------------------------
 
-export async function injectNavigation(data, outputDir) {
+export async function injectNavigation(data, outputDir, ledgerRoutes = null) {
   // Build navLinks from data.navigation (source-site nav passthrough) if
   // available; otherwise fall back to the legacy hardcoded shape using the
   // services list. Source-site nav wins because hardcoding "About / Services /
   // Blog / FAQ" loses every practice's actual nav structure.
   const sourceNav = Array.isArray(data.navigation) ? data.navigation : [];
   const navLinksJs = sourceNav.length > 0
-    ? buildNavLinksFromSource(sourceNav, data)
+    ? buildNavLinksFromSource(sourceNav, data, ledgerRoutes)
     : buildLegacyNavLinks(data);
 
   const content = `// Navigation link structure for Header.astro
@@ -436,6 +493,63 @@ export const navLinks: NavLink[] = ${navLinksJs};
 // Navigation mapping helpers
 // ---------------------------------------------------------------------------
 
+/** Route prefixes owned by another generator — mirrors page-port.js. */
+const PORT_OWNED_ROUTE = /^\/(?:$|services(?:\/|$)|team(?:\/|$)|blog(?:\/|$)|about$|faq$|financing$|gallery$|schedule$|thank-you$)/;
+
+/**
+ * Source href → rebuilt route, taken from the Architect ledger.
+ *
+ * Targets are checked against the routes the build will actually produce.
+ * Architect names destinations in its own terms — `/team/dr-azimi` where the
+ * team generator emits `/team/shayan-azimi` — and an unchecked target becomes a
+ * nav link to a 404. Entries that don't resolve are dropped so the existing
+ * heuristics (which do know the real slugs) handle them instead.
+ */
+function buildLedgerRouteMap(architecture, data = {}) {
+  if (!architecture?.ledger?.length) return null;
+
+  const real = new Set([
+    '/', '/about', '/services', '/faq', '/financing',
+    '/gallery', '/schedule', '/thank-you', '/blog',
+  ]);
+  for (const svc of data.services?.offered || []) {
+    if (svc?.slug) real.add(`/services/${svc.slug}`);
+  }
+  for (const doc of data.doctors || []) {
+    const slug = slugifyName(doc?.name);
+    if (slug) real.add(`/team/${slug}`);
+  }
+  // Routes this run will port into existence. Targets under a prefix another
+  // generator owns are skipped by page-port, so they are real only if the
+  // service/doctor lists above already produced them — otherwise Architect's
+  // naming (`/team/dr-azimi`) would mask the generator's (`/team/shayan-azimi`).
+  for (const entry of architecture.ledger) {
+    if (!entry?.target || entry.disposition === 'drop') continue;
+    const target = normalizeNavPath(entry.target);
+    if (!PORT_OWNED_ROUTE.test(target)) real.add(target);
+  }
+  const map = new Map();
+  const dropped = [];
+  for (const entry of architecture.ledger) {
+    if (!entry?.source || !entry.target) continue;
+    if (entry.disposition === 'drop') continue;
+    const target = normalizeNavPath(entry.target);
+    if (!real.has(target)) { dropped.push(`${entry.source} → ${entry.target}`); continue; }
+    map.set(normalizeNavPath(entry.source), entry.target);
+  }
+  if (dropped.length) {
+    console.log(`[injector.nav] Ignoring ${dropped.length} ledger target(s) with no matching route: ${dropped.slice(0, 4).join(', ')}${dropped.length > 4 ? '…' : ''}`);
+  }
+  return map.size ? map : null;
+}
+
+function normalizeNavPath(href) {
+  let p = String(href || '').trim().toLowerCase();
+  try { if (/^https?:\/\//.test(p)) p = new URL(p).pathname; } catch { /* keep as-is */ }
+  p = p.split(/[?#]/)[0].replace(/\/+$/, '');
+  return p || '/';
+}
+
 // Patterns we always drop (login portals, admin URLs)
 const NAV_JUNK = [
   /patient-?login/i,
@@ -465,9 +579,18 @@ function slugifyName(name) {
  * Map a source-site href to the rebuilt-site equivalent, when we can.
  * Returns null if the link should be dropped (no equivalent on the new site).
  */
-function mapNavHref(href, data) {
+function mapNavHref(href, data, ledgerRoutes = null) {
   if (!href) return null;
   if (isJunkNav(href)) return null;
+
+  // The Architect ledger already decided where each source page's content went,
+  // so it is the authoritative nav mapping. Without it the heuristics below send
+  // real destinations to the wrong place — /reviews.html to /about even when a
+  // /reviews page exists — or drop the link entirely.
+  if (ledgerRoutes) {
+    const direct = ledgerRoutes.get(normalizeNavPath(href));
+    if (direct) return direct;
+  }
 
   // Skip external/absolute URLs that aren't our domain
   if (/^https?:\/\//i.test(href)) {
@@ -486,8 +609,10 @@ function mapNavHref(href, data) {
   // Homepage link in nav — typically the logo handles this. Drop from menu.
   if (path === '/') return null;
 
-  // Doctor pages: /meet-dr-cortez → /team/cortez (if we have a matching doctor)
-  const drMatch = path.match(/\/meet[-_]?dr[-_]([a-z][a-z0-9-]*)/i);
+  // Doctor pages: /meet-dr-cortez or /dr-cortez → /team/<doctor slug>.
+  // Legacy dental sites use both shapes; matching only the `meet-` form dropped
+  // every bio link on sites that use the bare form.
+  const drMatch = path.match(/\/(?:meet[-_]?)?dr[-_.]([a-z][a-z0-9-]*)/i);
   if (drMatch) {
     const token = drMatch[1].toLowerCase();
     const doctors = data.doctors || [];
@@ -522,7 +647,7 @@ function mapNavHref(href, data) {
   return null;
 }
 
-function buildNavLinksFromSource(sourceNav, data) {
+function buildNavLinksFromSource(sourceNav, data, ledgerRoutes = null) {
   // Normalize: each item is { text, href, children? }
   const mapped = [];
   const seenHrefs = new Set();
@@ -530,7 +655,7 @@ function buildNavLinksFromSource(sourceNav, data) {
   for (const item of sourceNav) {
     const label = String(item?.text || '').trim().split(/\s{2,}|\n/)[0].slice(0, 40); // strip trailing crawled body
     if (!label) continue;
-    const href = mapNavHref(item?.href, data);
+    const href = mapNavHref(item?.href, data, ledgerRoutes);
     if (!href) continue;
     if (seenHrefs.has(href)) continue;
     seenHrefs.add(href);
@@ -542,7 +667,7 @@ function buildNavLinksFromSource(sourceNav, data) {
       for (const c of item.children) {
         const cLabel = String(c?.text || '').trim().split(/\s{2,}|\n/)[0].slice(0, 40);
         if (!cLabel) continue;
-        const cHref = mapNavHref(c?.href, data);
+        const cHref = mapNavHref(c?.href, data, ledgerRoutes);
         if (!cHref || seenChild.has(cHref)) continue;
         seenChild.add(cHref);
         children.push({ label: cLabel, href: cHref });
@@ -607,12 +732,107 @@ function serializeNavLinks(links) {
 // tailwind.config.mjs
 // ---------------------------------------------------------------------------
 
+/**
+ * Write src/styles/tokens.css — the single place colour values exist.
+ *
+ * Colours are declared as Tailwind v4 @theme variables, and context classes
+ * override THOSE SAME `--color-*` names. That detail is the whole design, and
+ * it is easy to get subtly wrong:
+ *
+ *   An earlier version added a `--c-primary` indirection and set
+ *   `--color-brand-primary: rgb(var(--c-primary))`, expecting a context to
+ *   flip the palette by reassigning `--c-primary`. It does not work. A custom
+ *   property's var() references are substituted at the element that DECLARES
+ *   it, so the root value gets baked in and inherited. Measured in a browser:
+ *   plain `text-brand-primary` read rgb(27,58,92) inside the dark context —
+ *   identical to light — while the opacity variant correctly read
+ *   rgb(71,133,201), because that one inlines the var() at the use site.
+ *   Half the utilities would have honoured the theme and half would not.
+ *
+ * Overriding `--color-*` directly is what we ship: plain utilities resolve
+ * correctly in every context.
+ *
+ * Known limit: Tailwind v4 constant-folds an opacity modifier when the theme
+ * colour is a literal, so `bg-brand-primary/10` becomes `#1b3a5c1a` and keeps
+ * the light value inside `.section-dark`. The alternatives are worse — see the
+ * measured comparison in the generated tokens.css. Inside a dark band, use an
+ * explicit token (`text-brand-on-dark`) rather than an opacity modifier.
+ *
+ * Verify any change here with getComputedStyle on BOTH a plain and an
+ * opacity-modified utility. The CSS looks correct in all three variants; only
+ * the computed value tells them apart.
+ */
+async function writeTokensCss(
+  { colors, highlight, onDark, accentOnDark, highlightOnDark, textRole, borderRole, pageBg },
+  outputDir,
+) {
+  const css = `/* Auto-generated by injector.js — do not edit by hand.
+   Colour values live here and ONLY here. tailwind.config.mjs carries no
+   colours; Tailwind v4 reads them from the @theme block below. */
+
+@theme {
+  --color-brand-primary:   ${colors.primary};
+  --color-brand-secondary: ${colors.secondary};
+  --color-brand-light:     ${colors.light};
+  --color-brand-accent:    ${colors.accent};
+  --color-brand-highlight: ${highlight};
+  /* Kept for templates that place text on a dark band explicitly. Inside
+     .section-dark, brand-primary already resolves to this. */
+  --color-brand-on-dark:   ${onDark};
+
+  --color-neutral-dark:    ${colors.dark};
+  --color-neutral-text:    ${textRole};
+  --color-neutral-mid:     ${colors.muted};
+  --color-neutral-light:   ${colors.light};
+  --color-neutral-border:  ${borderRole};
+
+  --color-surface-1:       ${pageBg};
+  --color-surface-2:       ${colors.light};
+
+  --color-charcoal:        ${colors.dark};
+  --color-mid-gray:        ${colors.muted};
+  --color-border-light:    ${borderRole};
+}
+
+/* Dark band. Add to any section sitting on the dark ground; everything inside
+   resolves correctly with no per-component overrides and no dark variants.
+
+   Correcting a colour for AA on a light ground pushes it away from AA on a
+   dark one, so each ground carries its own counterpart — the accent darkened
+   to pass on white measured 3.21:1 here without one.
+
+   This replaces a \`.bg-neutral-dark .text-brand-primary\` descendant rule,
+   which matched every element under a dark section including white cards
+   nested inside it, and produced more contrast failures than it fixed. An
+   opt-in class does not leak downward. */
+.section-dark {
+  --color-brand-primary:   ${onDark};
+  --color-brand-accent:    ${accentOnDark};
+  --color-brand-highlight: ${highlightOnDark};
+
+  --color-neutral-dark:    ${pageBg};
+  --color-neutral-text:    ${pageBg};
+  --color-neutral-mid:     ${colors.light};
+  --color-neutral-border:  ${colors.muted};
+
+  --color-surface-1:       ${colors.dark};
+  --color-surface-2:       ${colors.dark};
+
+  background-color: var(--color-surface-1);
+  color: var(--color-neutral-text);
+}
+`;
+  const dir = resolve(outputDir, 'src/styles');
+  await mkdir(dir, { recursive: true });
+  await writeFile(resolve(dir, 'tokens.css'), css, 'utf-8');
+}
+
 export async function injectTailwindConfig(data, outputDir) {
   // Strict — every design token must come from the brand step. No hardcoded
   // fallbacks. If a required key is missing, that means the upstream brand
   // step (the brand step) failed to produce it, and we want loud
   // failure rather than silently shipping generic defaults across builds.
-  const colors = data.brand?.colors || {};
+  let colors = data.brand?.colors || {};
   const fonts  = data.brand?.fonts  || {};
   // Full brand-dna roles (Step 6): real page background, divider, and body-text
   // colors. When absent (no brand step) we fall back to derived
@@ -624,8 +844,10 @@ export async function injectTailwindConfig(data, outputDir) {
 
   const required = ['primary', 'secondary', 'light', 'accent', 'dark', 'muted'];
   const missingColors = required.filter(k => !colors[k]);
-  // Accent-as-highlight on light surfaces (eyebrow labels) must meet AA 4.5:1.
-  const highlight = ensureContrast(colors.accent, colors.light, 4.5).hex;
+  // Throw here, not after the WCAG guard below. validatePalette/ensureContrast
+  // dereference these same colors, so a missing key crashed them first with
+  // `Invalid hex color: "undefined"` from contrast.js — burying this actionable
+  // message behind a stack trace that names neither the brand step nor the key.
   if (missingColors.length > 0) {
     throw new Error(
       `[injector] Brand palette missing required keys: ${missingColors.join(', ')}. ` +
@@ -633,6 +855,34 @@ export async function injectTailwindConfig(data, outputDir) {
       `Refusing to ship hardcoded fallback colors.`
     );
   }
+  // WCAG guard at the boundary.
+  //
+  // brand-tokens.js corrects the palette when it maps brand-dna, but later steps
+  // (reference catalog, distill, director) can replace `brand.colors` afterwards
+  // — one run reached this point with accent #7ab800 and light #e8f5f5, neither
+  // of which the earlier guard had ever seen. This is the last place colours
+  // exist before they become the site's Tailwind config, so validate here too.
+  const guarded = validatePalette({
+    primary:   colors.primary,
+    accent:    colors.accent,
+    highlight: colors.highlight || colors.accent,
+    light:     colors.light,
+    dark:      colors.dark,
+    muted:     colors.muted,
+  });
+  for (const adj of guarded.adjustments || []) {
+    console.log(`[injector] WCAG auto-correct: ${adj.key} ${adj.from} → ${adj.to}`);
+  }
+  for (const issue of guarded.issuesAfter || []) {
+    console.warn(`[injector] palette still fails AA: ${issue.label} at ${issue.contrast}:1`);
+  }
+  colors = { ...colors, primary: guarded.palette.primary, accent: guarded.palette.accent };
+
+  // Accent-as-highlight on light surfaces (eyebrow labels) must meet AA 4.5:1.
+  const highlight = ensureContrast(guarded.palette.highlight || colors.accent, colors.light, 4.5).hex;
+  // ...and its counterpart for text on the dark band.
+  const onDark = colors.primaryOnDark
+    || ensureContrast(guarded.palette.primary, colors.dark || '#111827', 4.5, { direction: 'lighter' }).hex;
   if (!fonts.heading || !fonts.body) {
     throw new Error(
       `[injector] Brand fonts missing: heading=${fonts.heading || '(missing)'}, body=${fonts.body || '(missing)'}. ` +
@@ -645,34 +895,40 @@ export async function injectTailwindConfig(data, outputDir) {
   //   surface-2   = brand.light  (warm off-white from brand)
   //   neutral-*   = derived from brand.dark / brand.muted / brand.light
   // No literal hex values appear in this output that didn't come from brand.
+  //
+  // Colours reach Tailwind through CSS variables rather than as hex, which is
+  // what lets a section redefine the whole palette by adding one class. See
+  // tokens.css below: `.section-dark` reassigns the same variable names, so
+  // `text-brand-primary` inside a dark band resolves to the lightened primary
+  // without any component needing a dark-mode variant.
+  //
+  // This supersedes the descendant-selector attempt documented in
+  // injectGlobalCss. `.bg-neutral-dark .text-brand-primary` matched every
+  // element under a dark section — including white cards nested inside one —
+  // and produced more failures than it fixed. An explicit opt-in class does
+  // not leak into nested contexts.
+  // Correcting a colour for AA on a light ground necessarily pushes it away
+  // from AA on a dark one — the accent darkened to 4.5:1 on white measured
+  // 3.21:1 on the dark band. Each ground needs its own counterpart, or
+  // .section-dark ships a contrast failure the moment anyone uses it.
+  const accentOnDark = ensureContrast(colors.accent, colors.dark, 4.5, { direction: 'lighter' }).hex;
+  const highlightOnDark = ensureContrast(highlight, colors.dark, 4.5, { direction: 'lighter' }).hex;
+
+  await writeTokensCss(
+    { colors, highlight, onDark, accentOnDark, highlightOnDark, textRole, borderRole, pageBg },
+    outputDir,
+  );
+
   const content = `/** @type {import('tailwindcss').Config} */
 export default {
   content: ['./src/**/*.{astro,html,js,jsx,md,mdx,svelte,ts,tsx,vue}'],
   theme: {
     extend: {
-      colors: {
-        brand: {
-          primary:   '${esc(colors.primary)}',
-          secondary: '${esc(colors.secondary)}',
-          light:     '${esc(colors.light)}',
-          accent:    '${esc(colors.accent)}',
-          highlight: '${esc(highlight)}',
-        },
-        neutral: {
-          dark:   '${esc(colors.dark)}',
-          text:   '${esc(textRole)}',
-          mid:    '${esc(colors.muted)}',
-          light:  '${esc(colors.light)}',
-          border: '${esc(borderRole)}',
-        },
-        surface: {
-          1: '${esc(pageBg)}',
-          2: '${esc(colors.light)}',
-        },
-        // Role-based border color (used as border-border-light in templates).
-        // Traces to brand-dna's dedicated border role (falls back to muted).
-        'border-light':'${esc(borderRole)}',
-      },
+      // Colours are NOT here. Tailwind v4 reads them from the @theme block in
+        // src/styles/tokens.css, which is also where the per-context grounds
+        // live. Defining them here as rgb(var(--x) / <alpha-value>) looks
+        // right and is v3 syntax — under v4 it compiles to / 1, silently
+        // making every opacity modifier fully opaque.
       fontFamily: {
         serif: ['${esc(fonts.heading)}', 'Georgia', 'serif'],
         sans:  ['${esc(fonts.body)}',    'system-ui', 'sans-serif'],
@@ -695,7 +951,7 @@ export default {
  * btn-secondary, .card, and .section-heading reflect the archetype choices
  * (radius, density, heading scale) instead of being hardcoded.
  */
-export async function injectGlobalCss(dna, outputDir) {
+export async function injectGlobalCss(dna, outputDir, colors = null) {
   if (!dna) return;
 
   // Radius token → Tailwind rounded class
@@ -754,8 +1010,18 @@ export async function injectGlobalCss(dna, outputDir) {
   // project-root tailwind.config.mjs so theme tokens resolve in @apply rules.
   // Without this, `@apply font-sans` (and every other utility class) fails
   // with "Cannot apply unknown utility class".
+  // NOTE: an earlier attempt re-pointed `text-brand-primary` to a lightened
+  // variant via `.bg-neutral-dark .text-brand-primary`. It made things worse:
+  // a descendant selector matches every element under a dark section, including
+  // white cards nested inside one, so the lightened colour landed on white and
+  // produced 14 new failures where it fixed fewer. CSS cannot see an element's
+  // real background — only its nearest styled ancestor — so primary-on-dark has
+  // to be fixed where the template actually places it.
   const css = `@import "tailwindcss";
 @config "../../tailwind.config.mjs";
+/* Colour tokens. Generated alongside tailwind.config.mjs; every colour class
+   in this file resolves through the variables it declares. */
+@import "./tokens.css";
 
 /* Auto-generated from design DNA — archetype: ${dna.archetype || 'default'} */
 
@@ -1285,3 +1551,6 @@ export function imageAlt(
 `;
   await writeFile(join(outputDir, 'src', 'config', 'design-dna.ts'), body);
 }
+
+// Exported for tests — nav mapping correctness is not observable otherwise.
+export { buildLedgerRouteMap as __buildLedgerRouteMap };

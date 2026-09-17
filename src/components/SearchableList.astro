@@ -1,0 +1,171 @@
+---
+/**
+ * SearchableList — a long list of entities, each with optional sub-items.
+ *
+ * Generalised from the insurance-carriers page, where a 30+ entry payor roster
+ * needed to stay usable without pagination. The same shape recurs for
+ * accepted plans, service menus, locations and FAQs.
+ *
+ * Three behaviours, and each exists for a reason:
+ *   collapsed by default   a wall of 200 sub-items is not browsable
+ *   expand/collapse all    scanning beats searching when you don't know the
+ *                          term you want
+ *   search auto-expands    a match buried in a collapsed item reads as "no
+ *                          result"; filtering without expanding is a bug
+ *
+ * Built on <details>, so it works before hydration and is keyboard- and
+ * screen-reader-navigable with no ARIA of our own.
+ *
+ * Usage:
+ *   <SearchableList
+ *     heading="Carriers & plans we work with"
+ *     note="Last updated June 1, 2026"
+ *     searchLabel="Search carriers or plans..."
+ *     items={carriers}
+ *   />
+ *
+ *   items: { name: string; items?: { label: string; sub?: string[] }[] }[]
+ */
+export interface ListEntry {
+  label: string;
+  sub?: string[];
+}
+export interface ListItem {
+  name: string;
+  items?: ListEntry[];
+}
+
+interface Props {
+  items: ListItem[];
+  heading?: string;
+  note?: string;
+  searchLabel?: string;
+  emptyText?: string;
+  /** Unique when a page carries more than one list. */
+  id?: string;
+}
+
+const {
+  items,
+  heading,
+  note,
+  searchLabel = 'Search...',
+  emptyText = 'No matches. Try a different term.',
+  id = 'searchable-list',
+} = Astro.props;
+
+/** One lowercase haystack per row so filtering is a substring test, not a walk. */
+const haystack = (item: ListItem) =>
+  [item.name, ...(item.items?.flatMap((i) => [i.label, ...(i.sub ?? [])]) ?? [])]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+---
+
+<div class="searchable-list" data-list-root={id}>
+  {(heading || note) && (
+    <div class="flex flex-wrap items-baseline justify-between gap-4 mb-5">
+      <div>
+        {heading && <h2 class="font-serif text-2xl text-neutral-dark">{heading}</h2>}
+        {note && <p class="text-sm text-neutral-mid mt-1">{note}</p>}
+      </div>
+      <button
+        type="button"
+        data-expand-all
+        aria-pressed="false"
+        class="text-sm font-semibold px-4 py-2 rounded-lg border border-border-light text-neutral-dark hover:bg-surface-2 transition-colors"
+      >
+        Expand all
+      </button>
+    </div>
+  )}
+
+  <label class="sr-only" for={`${id}-search`}>{searchLabel}</label>
+  <input
+    id={`${id}-search`}
+    type="search"
+    data-list-search
+    placeholder={searchLabel}
+    autocomplete="off"
+    class="w-full px-4 py-3 rounded-lg border border-border-light bg-surface-1 text-neutral-dark placeholder:text-neutral-mid focus:outline-none focus:ring-2 focus:ring-brand-primary"
+  />
+
+  <ul class="mt-4 divide-y divide-border-light">
+    {items.map((item) => (
+      <li class="py-1" data-list-row data-search={haystack(item)}>
+        {item.items?.length ? (
+          <details class="group">
+            <summary class="flex items-center justify-between gap-4 py-3.5 cursor-pointer select-none list-none">
+              <span class="text-neutral-dark">{item.name}</span>
+              <span class="text-neutral-mid text-sm shrink-0 group-open:rotate-180 transition-transform" aria-hidden="true">▾</span>
+            </summary>
+            <ul class="pb-4 pl-4 space-y-2">
+              {item.items.map((entry) => (
+                <li class="text-neutral-mid text-sm">
+                  {entry.label}
+                  {entry.sub?.length ? (
+                    <ul class="pl-4 mt-1 space-y-1">
+                      {entry.sub.map((s) => <li class="text-neutral-mid/80">{s}</li>)}
+                    </ul>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : (
+          <p class="py-3.5 text-neutral-dark">{item.name}</p>
+        )}
+      </li>
+    ))}
+  </ul>
+
+  <p data-list-empty class="hidden py-6 text-neutral-mid">{emptyText}</p>
+</div>
+
+<script>
+  // Scoped per instance so a page can carry several lists.
+  for (const root of document.querySelectorAll<HTMLElement>('[data-list-root]')) {
+    const search = root.querySelector<HTMLInputElement>('[data-list-search]');
+    const expandAll = root.querySelector<HTMLButtonElement>('[data-expand-all]');
+    const empty = root.querySelector<HTMLElement>('[data-list-empty]');
+    const rows = Array.from(root.querySelectorAll<HTMLElement>('[data-list-row]'));
+
+    const apply = () => {
+      const term = (search?.value ?? '').trim().toLowerCase();
+      let visible = 0;
+
+      for (const row of rows) {
+        const matches = term === '' || (row.dataset.search ?? '').includes(term);
+        row.style.display = matches ? '' : 'none';
+        if (matches) visible++;
+
+        // A match hidden inside a collapsed item looks like no match at all,
+        // so matches auto-expand. Non-matches close rather than being left
+        // as they were: a row that stays open while filtered out comes back
+        // expanded on the next search for no reason the user can see.
+        const details = row.querySelector('details');
+        if (details) details.open = term !== '' && matches;
+      }
+
+      empty?.classList.toggle('hidden', visible !== 0);
+
+      // Clearing the search collapses everything, so the button must agree.
+      if (expandAll && term === '') {
+        expandAll.textContent = 'Expand all';
+        expandAll.setAttribute('aria-pressed', 'false');
+      }
+    };
+
+    search?.addEventListener('input', apply);
+
+    expandAll?.addEventListener('click', () => {
+      const open = expandAll.getAttribute('aria-pressed') !== 'true';
+      for (const row of rows) {
+        const details = row.querySelector('details');
+        if (details) details.open = open;
+      }
+      expandAll.textContent = open ? 'Collapse all' : 'Expand all';
+      expandAll.setAttribute('aria-pressed', String(open));
+    });
+  }
+</script>
