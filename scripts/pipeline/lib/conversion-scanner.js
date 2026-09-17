@@ -94,11 +94,27 @@ export async function runConversionScan(bronze) {
   const ga4ScriptMatch = html.match(GA4_SCRIPT_RE);
   const ga4ConfigMatch = html.match(GA4_CONFIG_RE);
   const gtmMatch       = html.match(GTM_RE);
-  const ga4Id = ga4ScriptMatch?.[1] || ga4ConfigMatch?.[1] || null;
+  const ga4IdRaw = ga4ScriptMatch?.[1] || ga4ConfigMatch?.[1] || null;
+
+  /**
+   * A measurement ID shaped like a scaffold placeholder is not a measurement
+   * ID. Our own template shipped G-XXXXXXXXXX to a live site, this scanner
+   * faithfully reported "GA4 script detected (G-XXXXXXXXXX)", and that line
+   * went into a prospect's audit — telling them analytics was working when
+   * nothing was being recorded.
+   *
+   * Treat it as misconfigured, which is what it is: the tag is installed and
+   * sending to a property that does not exist. That is arguably worse than no
+   * tag at all, because it looks done.
+   */
+  const isPlaceholderId = (id) => !!id && /^G-(X{4,}|0{4,}|1234)/i.test(id);
+  const ga4Placeholder = isPlaceholderId(ga4IdRaw);
+  const ga4Id = ga4Placeholder ? null : ga4IdRaw;
 
   // If GTM is present without a visible GA4 ID, the GA4 setup is likely
   // inside the GTM container — give the benefit of the doubt and pass.
-  const hasGa4 = !!ga4Id || !!gtmMatch;
+  // A placeholder ID never earns that benefit.
+  const hasGa4 = (!!ga4Id || !!gtmMatch) && !ga4Placeholder;
 
   const hasPhoneClick = PHONE_CLICK_EVENT_RE.test(html) || TEL_CLICK_GTAG_RE.test(html);
 
@@ -108,11 +124,13 @@ export async function runConversionScan(bronze) {
   raw.push(buildFinding({
     id: 'no-ga4-configured',
     title: 'GA4 measurement script',
-    detail: ga4Id
-      ? `GA4 script detected (${ga4Id}).`
-      : gtmMatch
-        ? `GA4 likely configured via GTM container (${gtmMatch[2]}).`
-        : 'No GA4 measurement script or GTM container detected on the homepage.',
+    detail: ga4Placeholder
+      ? `A GA4 tag is installed but its measurement ID is an unreplaced placeholder (${ga4IdRaw}), so nothing is being recorded.`
+      : ga4Id
+        ? `GA4 script detected (${ga4Id}).`
+        : gtmMatch
+          ? `GA4 likely configured via GTM container (${gtmMatch[2]}).`
+          : 'No GA4 measurement script or GTM container detected on the homepage.',
     benefit: 'GA4 is the conversion data source Google Ads imports from. Without it, Smart Bidding has no signals to optimize against — every ad dollar is spent blind.',
     present: hasGa4,
     severityWhenMissing: 'critical',
