@@ -69,6 +69,63 @@ duplicates of its homepage.
 **Rule:** ship `src/pages/404.astro`, noindexed. `verify-launch.js` checks both
 that it builds and that it carries the directive.
 
+### User tokens unlock API access that account tokens refuse
+
+Creating an **Account-owned** token generally requires Super Administrator on
+that account. On a client's or MSP's account you are a member, not a super
+admin, so the create fails at the review step with `Unauthorized to access
+requested resource` — which reads like a permissions problem with the
+permissions you picked, and is not.
+
+A **User** token only requires that *you personally* hold what you are
+granting. Same member role, same zone, token creates fine. That one
+distinction is the difference between doing client configuration through the
+dashboard by hand and doing it through the API.
+
+What a user token buys, with `Zone:Read`, `DNS:Edit`, `Zone Settings:Edit` and
+`Account → Cloudflare Pages:Read`: DNS records, zone security settings, and
+Pages project inspection, all scriptable. See
+`scripts/pipeline/audit-client-zone.js`.
+
+What it does **not** cover: Rulesets. Reading redirect rules needs its own
+permission and returns a bare `Authentication error [code: 10000]` without
+it — verify redirects behaviourally instead (curl the www host and check the
+`location` header preserves path and query).
+
+Scope zones with `Include → Specific zone`, listed explicitly, never `All
+zones`. `All zones` silently absorbs every future client, so the blast radius
+of one leaked string grows with the book of business rather than with a
+decision. Set a TTL; a token without one outlives the engagement it was for.
+
+### Proxying is for HTTP, and only HTTP
+
+A client zone arrived with every record orange-clouded, including the
+Microsoft 365 DKIM selectors. The proxy terminates HTTP(S), so a proxied DKIM
+lookup returns Cloudflare's IPs instead of the TXT record a verifier asks
+for — mail could not be signed. With SPF `-all` and DMARC `p=quarantine`
+alongside it, the practice's outbound mail was liable to be quarantined, and
+nothing about sending looks broken from the sender's side.
+
+Records that must stay DNS-only: `*._domainkey` (DKIM), `autodiscover`,
+`enterpriseenrollment`, `enterpriseregistration`, `_dmarc`, mail hosts, SIP
+and Teams discovery. The rule generalises past any one vendor — if the
+hostname does not serve HTTP, the proxy has nothing useful to do with it.
+
+`audit-client-zone.js` fails on this.
+
+### Verify DNS and TLS the way the internet sees them
+
+Two ways to fool yourself, both hit while confirming the fix above:
+
+- A **local resolver answers from cache**, so a record can look unchanged for
+  its full TTL. Resolve through a public resolver (`dig @8.8.8.8`, or DNS over
+  HTTPS) to approximate what everyone else gets.
+- **OpenSSL 3 refuses obsolete TLS client-side.** `openssl s_client -tls1_1`
+  returned `no protocols available`, which looks exactly like the server
+  rejecting the connection and is in fact your own client declining to try.
+  Add `-cipher 'DEFAULT@SECLEVEL=0'` to get a real answer — the server's
+  refusal is a `tlsv1 alert protocol version` coming back over the wire.
+
 ### Account and role traps
 
 - A zone may live in a **client's or their MSP's** Cloudflare account, not ours.
