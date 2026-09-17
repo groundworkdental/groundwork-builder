@@ -246,11 +246,20 @@ async function checkWranglerVars(clientDir) {
     return;
   }
   if (!/^\s*\[vars\]/m.test(toml)) {
-    fail(
+    // Advisory, not fatal: whether this matters depends on how the project
+    // deploys and where its values come from. On Cloudflare's own build
+    // system a wrangler.toml supersedes dashboard variables, so a PUBLIC_*
+    // set there is silently dropped — that cost three builds on one site.
+    // But a project deployed with a local `wrangler pages deploy` never uses
+    // either mechanism (its build reads .env or committed config), and a
+    // value committed to source needs no [vars] at all. Failing here would
+    // flag correct setups, and a gate that flags correct setups gets muted.
+    warn(
       'wrangler vars',
-      'wrangler.toml exists with no [vars] block. Pages will read build config ' +
-        'from this file and ignore dashboard variables, so any PUBLIC_* value ' +
-        'set there is silently dropped.',
+      'wrangler.toml has no [vars] block. If this site relies on PUBLIC_* at ' +
+        'BUILD time and is built by Cloudflare, those values must be declared ' +
+        'here — dashboard variables are ignored when this file exists. ' +
+        'Not a problem if the values are committed or the site deploys locally.',
     );
     return;
   }
