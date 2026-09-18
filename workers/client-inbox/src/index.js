@@ -90,10 +90,13 @@ function extractBody(raw) {
 
 /** Trim a reply chain to the part that is actually new. */
 function topOfThread(body) {
-  const cut = body.search(
-    /^(On .+ wrote:|-----Original Message-----|_{10,}|From:\s.+@)/m,
-  );
-  return (cut > 40 ? body.slice(0, cut) : body).trim();
+  const cut = body.search(/^(On .+ wrote:|-----Original Message-----|_{10,}|From:\s.+@)/m);
+  if (cut === -1) return body.replace(/\n{3,}/g, '\n\n').trim();
+  const head = body.slice(0, cut).replace(/\n{3,}/g, '\n\n').trim();
+  // A message that is ONLY a quoted chain has nothing above the marker. Keep
+  // the whole thing rather than filing an empty row; an arbitrary character
+  // threshold here silently dropped real two-line replies.
+  return head.length ? head : body.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 async function knownAccount(db, slug) {
