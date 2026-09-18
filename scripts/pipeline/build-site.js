@@ -27,6 +27,7 @@ import { loadPreset } from './lib/preset-loader.js';
 import { scrape } from './lib/scraper.js';
 import { extractSilver } from './lib/ai-silver.js';
 import { loadIntake } from './lib/intake.js';
+import { evaluateDataFields } from './standards/practice-contract.js';
 import { mergeData } from './lib/merger.js';
 import { injectTemplate, injectGlobalCss } from './lib/injector.js';
 import { generatePages } from './lib/page-generator.js';
@@ -69,6 +70,7 @@ function parseArgs() {
     output: null,
     preset: 'dental',
     skipScrape: false,
+    requireReady: false,
     skipImages: false,
     skipAudit: false,
     skipDesign: false,
@@ -111,6 +113,9 @@ function parseArgs() {
         break;
       case '--skip-scrape':
         opts.skipScrape = true;
+        break;
+      case '--require-ready':
+        opts.requireReady = true;
         break;
       case '--skip-images':
         opts.skipImages = true;
@@ -209,6 +214,7 @@ Options:
   --output <path>    Output directory for new project
   --preset <name>    Vertical preset (default: dental)
   --skip-scrape      Skip website scraping
+  --require-ready    Stop if the practice contract reports critical gaps
   --skip-images      Skip image downloading
   --skip-audit       Skip AI site audit
   --skip-build       Skip build validation
@@ -425,6 +431,45 @@ async function main() {
   }
 
   const merged = mergeData(scraped, intake, preset);
+
+  // ── Readiness against the practice contract ────────────────────────────
+  // standards/practice-contract.js is the single declaration of what a build
+  // needs; check-readiness.js asks the same question of an intake BEFORE a
+  // run. Asking again here, against merged data, is the first point where
+  // the answer is complete — the crawl has supplied whatever the intake did
+  // not.
+  //
+  // Advisory by default. A cold build is expected to have gaps; that is what
+  // the missing report is for, and blocking here would stop previews that
+  // are worth showing. --require-ready makes critical gaps fatal, which is
+  // what a client-facing rebuild wants.
+  {
+    const readiness = evaluateDataFields(merged);
+    const crit = readiness.bySeverity.critical;
+    const imp = readiness.bySeverity.important;
+    stats.readiness = {
+      satisfied: readiness.satisfied.length,
+      total: readiness.satisfied.length + readiness.missing.length,
+      critical: crit.map(f => f.path),
+      important: imp.map(f => f.path),
+    };
+
+    console.log(
+      `  Contract: ${stats.readiness.satisfied}/${stats.readiness.total} fields present` +
+      (crit.length ? ` · ${crit.length} critical gap(s)` : '') +
+      (imp.length ? ` · ${imp.length} important` : ''),
+    );
+    for (const f of crit) {
+      console.warn(`    ✗ ${f.label} — ${f.hint}`);
+    }
+
+    if (crit.length && opts.requireReady) {
+      console.error('');
+      console.error(`Error: ${crit.length} critical contract gap(s) and --require-ready was set.`);
+      console.error('Supply the fields above in the intake, or drop --require-ready to build anyway.');
+      process.exit(1);
+    }
+  }
 
   // Canonical URL-derived slug — shared across outputDir, --publish, design
   // library distillation, Airtable, GCS, and the auto-rescan lookup. Must
