@@ -746,6 +746,132 @@ function checkGa4(pages) {
 }
 
 /**
+ * A page must not restate a practice fact that config already holds.
+ *
+ * src/config/site.ts is the one place a practice fact lives, and pages read
+ * from it. Five pages on the first client site retyped those facts anyway —
+ * contact.astro printed the street and city/state/zip as literal markup
+ * DIRECTLY BESIDE the `address` import it already had. The copies then
+ * drifted: hours appeared as both "Mon–Fri, 8:00 AM – 5:00 PM" and "Monday
+ * through Friday, 8:00 AM to 5:00 PM" on the same site.
+ *
+ * The version that reached patients was worse than untidy: /faq answered
+ * "Phone number coming soon" while the number was live in the header, the
+ * CTA band and the schema, because that answer was a hardcoded string and
+ * everything else read config.
+ *
+ * Only facts that are distinctive enough to be unambiguous are checked.
+ * City and state are deliberately excluded — "serving Mansfield families" is
+ * legitimate prose, and a gate that flags legitimate prose gets muted.
+ */
+async function checkConfigBypass(clientDir) {
+  const configPath = join(clientDir, 'src', 'config', 'site.ts');
+  const config = await readMaybe(configPath);
+  if (!config) {
+    pass('config bypass', 'no src/config/site.ts to compare against');
+    return;
+  }
+
+  // Pull the literals worth matching. A value only counts when it is
+  // distinctive: a bare zip or a two-word city turns up in ordinary
+  // sentences, a street address and a phone number do not.
+  const read = (key) => config.match(new RegExp(`\\b${key}:\\s*'([^']{4,})'`))?.[1]?.trim() || null;
+  const facts = [
+    ['street address', read('street')],
+    ['phone', read('phone')],
+    ['phone digits', read('phoneDigits')],
+    ['email', read('email')],
+  ].filter(([, v]) => v && v.length >= 7);
+
+  if (!facts.length) {
+    pass('config bypass', 'no distinctive facts set in config yet');
+    return;
+  }
+
+  const srcDir = join(clientDir, 'src');
+  const files = [];
+  async function walk(dir) {
+    let entries;
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name === 'config') continue;   // the source of truth itself
+        await walk(full);
+      } else if (e.name.endsWith('.astro')) {
+        files.push(full);
+      }
+    }
+  }
+  await walk(srcDir);
+
+  const hits = [];
+  for (const file of files) {
+    const text = await readMaybe(file);
+    if (!text) continue;
+    const lines = text.split('\n');
+    for (const [label, value] of facts) {
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].includes(value)) continue;
+        hits.push(`${relative(clientDir, file)}:${i + 1} restates the ${label}`);
+      }
+    }
+  }
+
+  if (hits.length) {
+    fail(
+      'config bypass',
+      `${hits.length} hardcoded practice fact(s) — these drift the moment ` +
+        `config changes, and config is what every other surface reads: ` +
+        `${hits.slice(0, 4).join('; ')}` +
+        `${hits.length > 4 ? ` (+${hits.length - 4} more)` : ''}`,
+    );
+    return;
+  }
+  pass('config bypass', `${facts.length} fact(s) checked, every page reads config`);
+}
+
+/**
+ * Copy about a missing fact must disappear when the fact arrives.
+ *
+ * Degrading gracefully worked on the first client: an empty site.phone meant
+ * no tel: links, no schema telephone, no call action, an email-first CTA —
+ * one config value lit all of it up at once. What did not follow was the
+ * prose. Two pages still said "email is the fastest way to reach us", false
+ * from the moment a phone existed, and /faq still answered that a phone was
+ * coming soon.
+ *
+ * Conditional copy has to be as conditional as the markup around it.
+ */
+function checkStaleConditionalCopy(pages, config) {
+  const hasPhone = /\bphone:\s*'[^']{7,}'/.test(config || '');
+  if (!hasPhone) {
+    pass('conditional copy', 'no phone in config — absence copy is accurate');
+    return;
+  }
+  const STALE = [
+    ['phone "coming soon"', /phone[^.<]{0,40}\bcoming soon\b/i],
+    ['no phone yet', /(don'?t|do not|does not) (yet )?have a (phone|telephone)/i],
+    ['email is fastest', /email[^.<]{0,30}\b(is|remains) the (fastest|quickest|best) way\b/i],
+  ];
+  const hits = [];
+  for (const [route, html] of pages) {
+    for (const [label, re] of STALE) {
+      if (re.test(html)) hits.push(`${route}: ${label}`);
+    }
+  }
+  if (hits.length) {
+    fail(
+      'conditional copy',
+      `config has a phone number, but ${hits.length} page(s) still tell the ` +
+        `visitor otherwise: ${[...new Set(hits)].slice(0, 4).join('; ')}`,
+    );
+    return;
+  }
+  pass('conditional copy', 'no copy contradicting the phone number in config');
+}
+
+/**
  * A built 404.html is what makes Pages answer 404 at all.
  *
  * With none, it falls back to index.html with a 200 for unmatched routes, so
@@ -810,6 +936,8 @@ async function main() {
   await checkWorkingTree(clientDir);
   await checkImageSets(clientDir);
   await checkWranglerVars(clientDir);
+  await checkConfigBypass(clientDir);
+  checkStaleConditionalCopy(pages, await readMaybe(join(clientDir, 'src', 'config', 'site.ts')));
 
   const failed = results.filter((r) => !r.ok);
   const warned = results.filter((r) => r.warn);

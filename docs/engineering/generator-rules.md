@@ -33,6 +33,40 @@ build output and fails on anything missing.
 
 ---
 
+## Config is the only source of a practice fact
+
+Rules 4 and 5 were missing from this triage entirely — the only two of the
+twelve that were never recorded. Rule 4 is also the one that produced the
+worst live defect: `/faq` answered **"Phone number coming soon"** while the
+number was live in the header, the CTA band and the schema, because that one
+answer was a hardcoded string and everything else read config.
+
+| Rule | Gate | Status |
+|---|---|---|
+| **4.** One config, and pages must not bypass it | `verify-launch.js` → `config bypass` — compares `src/config/site.ts` literals against every `.astro` under `src/` | **done** |
+| **5.** Degrade gracefully, then light up in one place | `verify-launch.js` → `conditional copy` — when config has a phone, no page may still say one is coming | **done** (copy half) |
+
+`config bypass` checks only facts distinctive enough to be unambiguous —
+street address, phone, phone digits, email. City and state are deliberately
+excluded: "serving Mansfield families" is legitimate prose, and a gate that
+flags legitimate prose gets muted, which is how it comes to miss the real
+thing.
+
+Two parts of rule 5 are **not** gated and remain conventions:
+
+- Provide config for every *form* a fact is needed in (`hours.display` for a
+  table, `hours.sentence` for prose). Where only one form exists, pages
+  rewrite it into the other and the two drift.
+- Derive CTA precedence in config rather than per page:
+  `weaveBookUrl || (phoneDigits ? tel : mailto)`.
+
+Rule 4's environment half is also convention: practice facts belong in
+`src/config/site.ts`, while `.env` and `wrangler.toml` hold build-and-deploy
+values only. `PUBLIC_DISPLAY_PHONE` was documented in `.env.example`, set by
+the operator, and **read by no code at all**.
+
+---
+
 ## Template and generator changes
 
 | Rule | Where | Status |
