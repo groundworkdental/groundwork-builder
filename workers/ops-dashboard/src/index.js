@@ -64,6 +64,45 @@ async function handleApi(url, env) {
       return json(results ?? []);
     }
 
+    // The queue: what is waiting on a human. Same source as `npm run log --
+    // open`, because two answers to "what needs me?" is one answer too many.
+    if (path === '/api/queue') {
+      const [untriaged, unrouted, proposals, recent] = await Promise.all([
+        env.DB.prepare(
+          `SELECT id, slug, occurred_at, summary, actor FROM client_events
+            WHERE kind = 'change' AND systemic IS NULL
+            ORDER BY occurred_at DESC LIMIT 50`).all(),
+        env.DB.prepare(
+          `SELECT id, slug, occurred_at, summary, actor FROM client_events
+            WHERE kind = 'change' AND systemic = 'yes'
+              AND (routed_to IS NULL OR routed_to = '')
+            ORDER BY occurred_at DESC LIMIT 50`).all(),
+        env.DB.prepare(
+          `SELECT id, slug, occurred_at, summary, detail FROM client_events
+            WHERE kind = 'decision' AND summary LIKE 'PROPOSAL:%'
+              AND (routed_to IS NULL OR routed_to = '')
+            ORDER BY occurred_at DESC LIMIT 50`).all(),
+        env.DB.prepare(
+          `SELECT id, slug, occurred_at, kind, direction, summary, actor
+             FROM client_events ORDER BY occurred_at DESC LIMIT 40`).all(),
+      ]);
+      return json({
+        untriaged: untriaged.results || [],
+        unrouted: unrouted.results || [],
+        proposals: proposals.results || [],
+        recent: recent.results || [],
+      });
+    }
+
+    if (path === '/api/timeline') {
+      const slug = url.searchParams.get('slug');
+      if (!slug) return json({ error: 'slug required' }, 400);
+      const rows = await env.DB.prepare(
+        `SELECT * FROM client_events WHERE slug = ? ORDER BY occurred_at DESC LIMIT 200`,
+      ).bind(slug).all();
+      return json({ events: rows.results || [] });
+    }
+
     if (path === '/api/accounts') {
       const { results } = await env.DB.prepare(
         `SELECT a.slug, a.practice_name, a.city, a.state,
@@ -109,7 +148,26 @@ async function serveUI(env) {
   // Fetch everything in parallel before rendering
   let stats = { totalBuilds: 0, successRate: 0, practices: 0, weekRuns: 0, sourced: 0 };
   let runs = [], accounts = [], practices = [], builds = [], sourced = [], audits = [];
+  let queue = { untriaged: [], unrouted: [], proposals: [], recent: [] };
   let dbError = null;
+  // The queue is fetched separately: client_events is newer than the rest of
+  // the schema, and a dashboard that 500s because one table is missing is a
+  // dashboard nobody opens.
+  try {
+    const [untriaged, unrouted, proposals, recent] = await Promise.all([
+      env.DB.prepare("SELECT id, slug, occurred_at, summary, actor FROM client_events WHERE kind = 'change' AND systemic IS NULL ORDER BY occurred_at DESC LIMIT 50").all(),
+      env.DB.prepare("SELECT id, slug, occurred_at, summary, actor FROM client_events WHERE kind = 'change' AND systemic = 'yes' AND (routed_to IS NULL OR routed_to = '') ORDER BY occurred_at DESC LIMIT 50").all(),
+      env.DB.prepare("SELECT id, slug, occurred_at, summary, detail FROM client_events WHERE kind = 'decision' AND summary LIKE 'PROPOSAL:%' AND (routed_to IS NULL OR routed_to = '') ORDER BY occurred_at DESC LIMIT 50").all(),
+      env.DB.prepare("SELECT id, slug, occurred_at, kind, direction, summary, actor FROM client_events ORDER BY occurred_at DESC LIMIT 40").all(),
+    ]);
+    queue = {
+      untriaged: untriaged.results || [], unrouted: unrouted.results || [],
+      proposals: proposals.results || [], recent: recent.results || [],
+    };
+  } catch (err) {
+    queue.error = err.message;
+  }
+
   try {
     const [totals, successes, practiceCount, week, sourcedCount,
            runsRows, accountRows, practiceRows, buildRows, sourcedRows, auditRows] =
@@ -683,8 +741,24 @@ ${dbError ? `<div style="background:var(--danger-bg);color:var(--danger-text);pa
   <div class="stat"><div class="stat-val">${stats.practices}</div><div class="stat-label">Design Profiles</div></div>
 </div>
 
+<style>
+  .q-head{font-size:15px;font-weight:600;margin:0 0 18px;color:#e5e7eb}
+  .q-clear{padding:28px;text-align:center;color:#9ca3af;border:1px dashed #374151;border-radius:8px}
+  .q-section{margin-bottom:26px}
+  .q-title{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#9ca3af;margin:0 0 4px}
+  .q-count{display:inline-block;background:#374151;color:#e5e7eb;border-radius:9px;padding:1px 7px;font-size:11px;margin-left:6px}
+  .q-note{font-size:12px;color:#6b7280;margin:0 0 10px}
+  .q-row{border:1px solid #374151;border-radius:6px;padding:10px 12px;margin-bottom:7px;background:#111827}
+  .q-row.q-thin{padding:7px 12px;background:transparent}
+  .q-main{font-size:13px;color:#f3f4f6;margin-bottom:3px}
+  .q-meta{font-size:11px;color:#9ca3af}
+  .q-cmd{display:block;margin-top:7px;font-size:11px;color:#6ee7b7;background:#0b1220;padding:5px 7px;border-radius:4px;overflow-x:auto}
+</style>
+
 <div class="tabs">
-  <button class="tab-btn active" data-tab="sourced">Prospects</button>
+  <button class="tab-btn active" data-tab="queue">Queue</button>
+  <span class="tab-sep"></span>
+  <button class="tab-btn" data-tab="sourced">Prospects</button>
   <button class="tab-btn" data-tab="accounts">Accounts</button>
   <button class="tab-btn" data-tab="audits">Audits</button>
   <button class="tab-btn" data-tab="builds">Previews</button>
@@ -694,7 +768,8 @@ ${dbError ? `<div style="background:var(--danger-bg);color:var(--danger-text);pa
 </div>
 
 <div class="content">
-  <div class="panel active" id="tab-sourced"></div>
+  <div class="panel active" id="tab-queue"></div>
+  <div class="panel" id="tab-sourced"></div>
   <div class="panel" id="tab-accounts"></div>
   <div class="panel" id="tab-audits"></div>
   <div class="panel" id="tab-builds"></div>
@@ -712,6 +787,7 @@ const ACCOUNTS  = ${safeJson(accounts)};
 const BUILDS    = ${safeJson(builds)};
 const SOURCED   = ${safeJson(sourced)};
 const AUDITS    = ${safeJson(audits)};
+const QUEUE     = ${safeJson(queue)};
 
 // ---------------------------------------------------------------------------
 // Helpers (NOTE: no backslash escapes allowed — this lives in a server template)
@@ -968,6 +1044,94 @@ function sortRows(tab, rows, p) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Queue — what is waiting on a human
+//
+// Same source as "npm run log -- open". Two answers to "what needs me?" is one
+// answer too many, so both read client_events and neither caches.
+// ---------------------------------------------------------------------------
+
+function qTime(iso) {
+  return String(iso || '').replace('T', ' ').slice(0, 16);
+}
+
+function qSection(title, note, rows, renderRow) {
+  if (!rows || !rows.length) return '';
+  var items = rows.map(renderRow).join('');
+  return '<div class="q-section">'
+    + '<h3 class="q-title">' + esc(title) + ' <span class="q-count">' + rows.length + '</span></h3>'
+    + '<p class="q-note">' + esc(note) + '</p>'
+    + '<div class="q-rows">' + items + '</div></div>';
+}
+
+function renderQueue() {
+  var el = document.getElementById('tab-queue');
+  if (QUEUE.error) {
+    el.innerHTML = '<p class="q-note">Ledger unavailable: ' + esc(QUEUE.error) + '</p>';
+    return;
+  }
+
+  var total = QUEUE.untriaged.length + QUEUE.unrouted.length + QUEUE.proposals.length;
+  var head = total === 0
+    ? '<div class="q-clear">Nothing waiting on you. Every change is triaged and every systemic one is routed.</div>'
+    : '<div class="q-head">' + total + ' item' + (total === 1 ? '' : 's') + ' waiting on you</div>';
+
+  var proposals = qSection(
+    'Proposals', 'The router thinks these would recur on the next build. Approve by opening a PR, then route the event to it.',
+    QUEUE.proposals,
+    function (r) {
+      var lines = String(r.detail || '').split(String.fromCharCode(10));
+      var affects = '';
+      var confidence = '';
+      lines.forEach(function (l) {
+        if (l.indexOf('affects:') === 0) affects = l.replace('affects:', '').trim();
+        if (l.indexOf('confidence:') === 0) confidence = l.replace('confidence:', '').trim();
+      });
+      return '<div class="q-row">'
+        + '<div class="q-main">' + esc(String(r.summary).replace('PROPOSAL: ', '')) + '</div>'
+        + '<div class="q-meta">' + esc(r.slug) + ' · ' + qTime(r.occurred_at)
+        + (affects ? ' · affects <b>' + esc(affects) + '</b>' : '')
+        + (confidence ? ' · ' + esc(confidence) + ' confidence' : '')
+        + '</div>'
+        + '<code class="q-cmd">npm run log -- triage ' + esc(String(r.id).slice(0, 8)) + ' --systemic yes --routed &lt;pr-url&gt;</code>'
+        + '</div>';
+    });
+
+  var untriaged = qSection(
+    'Untriaged changes', 'Would this defect exist on the next site we build?',
+    QUEUE.untriaged,
+    function (r) {
+      return '<div class="q-row">'
+        + '<div class="q-main">' + esc(r.summary) + '</div>'
+        + '<div class="q-meta">' + esc(r.slug) + ' · ' + qTime(r.occurred_at) + ' · ' + esc(r.actor) + '</div>'
+        + '<code class="q-cmd">npm run log -- triage ' + esc(String(r.id).slice(0, 8)) + ' --systemic yes|no</code>'
+        + '</div>';
+    });
+
+  var unrouted = qSection(
+    'Systemic, but unrouted', 'Marked as general, with nowhere named for the general fix.',
+    QUEUE.unrouted,
+    function (r) {
+      return '<div class="q-row">'
+        + '<div class="q-main">' + esc(r.summary) + '</div>'
+        + '<div class="q-meta">' + esc(r.slug) + ' · ' + qTime(r.occurred_at) + '</div>'
+        + '</div>';
+    });
+
+  var recent = qSection(
+    'Recent activity', 'Everything on every timeline, newest first.',
+    QUEUE.recent,
+    function (r) {
+      var arrow = r.direction === 'in' ? ' &larr;' : r.direction === 'out' ? ' &rarr;' : '';
+      return '<div class="q-row q-thin">'
+        + '<div class="q-main">' + esc(r.summary) + '</div>'
+        + '<div class="q-meta">' + esc(r.slug) + ' · ' + esc(r.kind) + arrow + ' · ' + qTime(r.occurred_at) + '</div>'
+        + '</div>';
+    });
+
+  el.innerHTML = head + proposals + untriaged + unrouted + recent;
+}
+
 function render(tab) {
   const panel = document.getElementById('tab-' + tab);
   const p = tabPrefs(tab);
@@ -1127,6 +1291,8 @@ document.querySelectorAll('.tab-btn').forEach(function (btn) {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
   });
 });
+
+renderQueue();
 
 ['sourced', 'accounts', 'audits', 'builds', 'runs', 'practices'].forEach(function (t) {
   buildPanel(t);
