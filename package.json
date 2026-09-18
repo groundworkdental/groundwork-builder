@@ -48,7 +48,8 @@
     "verify:silver": "node scripts/pipeline/verify-silver.js",
     "check:content": "node scripts/check-content.mjs",
     "check:content:built": "node scripts/check-content.mjs --built",
-    "log": "node --env-file=.env scripts/log.mjs"
+    "log": "node --env-file=.env scripts/log.mjs",
+    "mail": "node --env-file=.env scripts/mail.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
