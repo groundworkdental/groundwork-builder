@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>content/architect · Skill</title>
+<style>
+  :root {
+    --bg: #0f1115; --fg: #e7e8ea; --muted: #9098a3; --accent: #6ee7b7;
+    --card: #181b22; --border: #262a33; --code-bg: #0a0c10;
+    --stub: #6b7280; --working: #f59e0b; --polished: #10b981; --mature: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  .topbar { padding: 16px 40px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .topbar a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  .topbar a:hover { text-decoration: underline; }
+  .topbar-meta { color: var(--muted); font-size: 12px; }
+  .container { max-width: 880px; margin: 0 auto; padding: 32px 40px 80px; }
+  header.skill-head { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+  header.skill-head h1 { margin: 0 0 4px; font-size: 28px; font-weight: 600; }
+  .skill-path { color: var(--muted); font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px; }
+  .badges { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+  .badge.tier { background: var(--border); font-family: ui-monospace, monospace; }
+  .badge.tier-L1 { background: rgba(110, 231, 183, .15); color: var(--accent); }
+  .badge.tier-L2 { background: rgba(245, 158, 11, .15); color: var(--working); }
+  .badge.tier-L3 { background: rgba(59, 130, 246, .15); color: #60a5fa; }
+  .badge.tier-L4 { background: rgba(168, 85, 247, .15); color: #c084fc; }
+  .badge.maturity { background: var(--border); }
+  .badge.phase { background: var(--card); border: 1px solid var(--border); color: var(--muted); }
+  .meta-table { font-size: 13px; color: var(--muted); margin-top: 12px; }
+  .meta-table strong { color: var(--fg); font-weight: 500; }
+  .meta-table code { background: var(--card); padding: 1px 5px; border-radius: 3px; font-size: 12px; color: var(--accent); }
+  .doc h2 { margin: 32px 0 12px; font-size: 20px; font-weight: 600; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .doc h3 { margin: 24px 0 8px; font-size: 16px; font-weight: 600; color: var(--accent); }
+  .doc p { margin: 0 0 14px; }
+  .doc ul, .doc ol { margin: 0 0 14px; padding-left: 24px; }
+  .doc li { margin-bottom: 4px; }
+  .doc a { color: var(--accent); }
+  .doc strong { color: var(--fg); font-weight: 600; }
+  .doc code { background: var(--card); padding: 2px 6px; border-radius: 3px; font-size: 13px; color: var(--accent); font-family: ui-monospace, SFMono-Regular, monospace; }
+  .doc pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; margin: 0 0 16px; }
+  .doc pre code { background: transparent; padding: 0; color: var(--fg); font-size: 13px; line-height: 1.5; white-space: pre; }
+  .doc table { border-collapse: collapse; margin: 0 0 16px; font-size: 14px; width: 100%; }
+  .doc th, .doc td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  .doc th { background: var(--card); font-weight: 600; }
+  .doc blockquote { border-left: 3px solid var(--accent); padding: 4px 16px; margin: 0 0 16px; color: var(--muted); }
+  .doc hr { border: 0; border-top: 1px solid var(--border); margin: 32px 0; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <a href="../PIPELINE.html">← Back to Pipeline Dashboard</a>
+  <span class="topbar-meta">Source: <code style="background:transparent">skills/content/architect.md</code></span>
+</div>
+
+<div class="container">
+  <header class="skill-head">
+    <div class="skill-path">skills/content/architect.md</div>
+    <h1>architect</h1>
+    <div class="badges">
+      <span class="badge tier tier-L1">L1</span>
+      <span class="badge maturity">experimental</span>
+      <span class="badge phase">Phase: Architect</span>
+      <span class="badge phase">Model: claude-sonnet-4-6</span>
+    </div>
+    
+    <div class="meta-table">
+      <div><strong>Source:</strong> <code>scripts/pipeline/lib/ai-architect.js</code></div>
+      <div><strong>Function:</strong> <code>runArchitect()</code></div>
+    </div>
+  </header>
+
+  <div class="doc">
+<h1>Skill: Architect (Information Architecture + Disposition Ledger)</h1>
+<h2>Responsibility</h2>
+<p>Decides the <strong>page set</strong> of the rebuilt site, and assigns every ingested source
+page a <strong>disposition</strong> — what happened to it and where its content went.</p>
+<p>This is the step that was missing. Content Map scores sections and Content Write
+fills a fixed schema, so no phase ever reasoned about pages. The rebuild used a
+hardcoded page list and silently dropped whatever didn&#39;t fit: on the reference
+site, 38 informational pages became 0, and 26 pages carrying ~27k words were
+301&#39;d to the bare homepage with nothing flagging it.</p>
+<p><strong>Authoritative.</strong> The ledger drives real output: <code>page-port.js</code> writes the
+<code>port</code> / <code>standalone-port</code> routes and appends <code>absorb-as-section</code> / <code>merge-into</code>
+content into their targets, redirects are re-pointed from the ledger, and
+navigation is mapped through it. <code>_pipeline/03-architecture.json</code> remains the
+record of what was decided.</p>
+<h2>Design principle: strict accounting, loose shape</h2>
+<p>The page set is the model&#39;s call — it should fit the practice, not a template.
+What is <em>not</em> negotiable is the accounting:</p>
+<ul>
+<li>every ingested reference page gets <strong>exactly one</strong> disposition</li>
+<li>every <code>strong</code> / <code>adequate</code> page must land somewhere (never <code>drop</code>)</li>
+<li>every proposed page must cite at least one source page, or be justified as new</li>
+</ul>
+<p>Flexibility in shape is safe only because the accounting is closed. Unassigned
+pages are a hard validation failure, backfilled as <code>unassigned</code> and reported.</p>
+<h2>Dispositions</h2>
+<table>
+<thead>
+<tr>
+<th>Disposition</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>port</code></td>
+<td>Becomes its own page in the rebuild, content carried over</td>
+</tr>
+<tr>
+<td><code>standalone-port</code></td>
+<td>Ported verbatim as a one-off page outside the normal IA (language variants, oddities that shouldn&#39;t be dropped or normalized)</td>
+</tr>
+<tr>
+<td><code>merge-into</code></td>
+<td>Content folded into another page; <code>target</code> names it</td>
+</tr>
+<tr>
+<td><code>absorb-as-section</code></td>
+<td>Becomes a section of a broader page rather than its own route</td>
+</tr>
+<tr>
+<td><code>drop</code></td>
+<td>Deliberately not carried. Requires a reason. Only valid for <code>weak</code> / <code>boilerplate</code></td>
+</tr>
+</tbody></table>
+<h2>Inputs</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Source</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pageQuality</code></td>
+<td>array</td>
+<td>page-quality.js</td>
+<td>Per-page unique-word score + <code>mustPreserve</code> flag. Deterministic.</td>
+</tr>
+<tr>
+<td><code>services</code></td>
+<td>array</td>
+<td>silver</td>
+<td>Service taxonomy the rebuild will generate pages for</td>
+</tr>
+<tr>
+<td><code>practice</code></td>
+<td>object</td>
+<td>silver</td>
+<td>Name, city — for naming location/language routes</td>
+</tr>
+<tr>
+<td><code>floor</code></td>
+<td>array</td>
+<td>preset</td>
+<td>Page types every site must have regardless of source</td>
+</tr>
+</tbody></table>
+<h2>Output schema</h2>
+<pre><code class="language-json">{
+  &quot;pages&quot;: [
+    { &quot;route&quot;: &quot;/about&quot;, &quot;type&quot;: &quot;about&quot;, &quot;title&quot;: &quot;string&quot;,
+      &quot;sources&quot;: [&quot;/about-us.html&quot;], &quot;rationale&quot;: &quot;string&quot; }
+  ],
+  &quot;ledger&quot;: [
+    { &quot;source&quot;: &quot;/se-habla-espanol.html&quot;, &quot;disposition&quot;: &quot;standalone-port&quot;,
+      &quot;target&quot;: &quot;/es&quot;, &quot;rationale&quot;: &quot;string&quot; }
+  ],
+  &quot;rationale&quot;: &quot;2-3 sentences on the overall architecture&quot;
+}
+</code></pre>
+<h2>Evaluation criteria</h2>
+<ul>
+<li><strong>Closed ledger</strong> — every input page appears exactly once in <code>ledger</code></li>
+<li><strong>No silent loss</strong> — no <code>mustPreserve</code> page has <code>disposition: drop</code></li>
+<li><strong>Targets resolve</strong> — every <code>target</code> names a route present in <code>pages</code></li>
+<li><strong>Sources are real</strong> — every <code>sources[]</code> entry is an input page path</li>
+<li><strong>Floor satisfied</strong> — required page types all present</li>
+<li><strong>No invented pages</strong> — every proposed page cites a source, or is a floor page</li>
+<li><strong>Service routes exist</strong> — every <code>/services/&lt;slug&gt;</code> target uses a slug from silver&#39;s taxonomy</li>
+</ul>
+<h2>Known gaps</h2>
+<ul>
+<li>Blog is out of scope: posts are ported verbatim by <code>blog-migrate.js</code> and need no IA decision</li>
+<li>IA is re-derived per run; not yet pinned per client, so routes can drift between runs</li>
+<li>Targets under a prefix another generator owns (<code>/services/*</code>, <code>/team/*</code>) are
+validated, not authored — Architect names the destination, the taxonomy and
+doctor list decide the actual slug</li>
+</ul>
+<hr>
+<h2>PROMPT</h2>
+<pre><code class="language-text">You are the information architect for a **{{verticalName}}** practice website rebuild.
+
+The practice&#39;s existing site has been crawled. Your job is to decide **what pages
+the new site should have**, and to account for **every page of the old site** —
+where its content goes, or why it is being dropped.
+
+## Practice
+
+**Name:** {{practiceName}}
+**Location:** {{city}}, {{state}}
+**Services the rebuild will generate pages for:** {{serviceSlugs}}
+
+Service pages are generated from that taxonomy, not by you. When a target is a
+service page it MUST be `/services/&lt;slug&gt;` using a slug from that exact list —
+any other service route is a 404. If a source page has no matching slug, send it
+to `/services` (the index) instead of inventing a route for it.
+
+## Required pages (the floor)
+
+Every site must have these regardless of what the old site had:
+
+{{floorBlock}}
+
+Beyond the floor, the page set is yours to decide. Do not pad it to look complete,
+and do not force the old site&#39;s structure onto the new one — its organization is
+usually the thing being fixed.
+
+## Source pages
+
+Each page below was crawled, with a **unique word count**: body text that appears
+on no other page. `KEEP` marks pages whose content must land somewhere in the new
+site. Raw word counts are not shown because repeated nav/footer copy inflates them.
+
+{{pagesBlock}}
+
+## Your task
+
+### 1. Decide the page set
+
+Propose the routes the new site should have. For each, list which source pages
+feed it. A page with no source must be one of the required floor pages — never
+invent a page the practice has no content for.
+
+### 2. Assign every source page a disposition
+
+Use exactly one per source page:
+
+- `port` — becomes its own page
+- `standalone-port` — carried over verbatim as a one-off outside the normal IA.
+  Use for content that would be lost by normalizing it: a Spanish-language page,
+  a neighborhood page with real local copy, anything genuinely valuable that
+  doesn&#39;t fit a standard route. Prefer this over `drop` whenever content is real.
+- `merge-into` — content folded into another page; name it in `target`
+- `absorb-as-section` — becomes a section of a broader page; name it in `target`
+- `drop` — deliberately not carried. Give a real reason.
+
+### Rules
+
+1. **A `KEEP` page may never be dropped.** Merge it, absorb it, or port it.
+2. **Every source page appears exactly once** in the ledger. No omissions.
+3. **`target` must name a route you listed in `pages`.**
+4. **Never redirect real content at the homepage.** If the only place a page could
+   go is `/`, that means you have not given its content a home — fix the page set.
+5. **Do not invent pages.** No page exists that has neither a source nor a floor slot.
+6. Group related thin pages rather than creating a route each. Several weak pages
+   about one topic usually belong as sections of one strong page.
+
+Return ONLY a JSON object:
+
+```json
+{
+  &quot;pages&quot;: [
+    {
+      &quot;route&quot;: &quot;/about&quot;,
+      &quot;type&quot;: &quot;about&quot;,
+      &quot;title&quot;: &quot;Page title&quot;,
+      &quot;sources&quot;: [&quot;/about-us.html&quot;, &quot;/meet-your-dentists.html&quot;],
+      &quot;rationale&quot;: &quot;Why this page exists and what it consolidates&quot;
+    }
+  ],
+  &quot;ledger&quot;: [
+    {
+      &quot;source&quot;: &quot;/about-us.html&quot;,
+      &quot;disposition&quot;: &quot;merge-into&quot;,
+      &quot;target&quot;: &quot;/about&quot;,
+      &quot;rationale&quot;: &quot;Practice overview becomes the About intro&quot;
+    }
+  ],
+  &quot;rationale&quot;: &quot;2-3 sentences on the architecture you chose and why&quot;
+}
+</code></pre>
+<p>No markdown formatting, no explanation before or after.</p>
+<pre><code>
+</code></pre>
+
+  </div>
+</div>
+</body>
+</html>

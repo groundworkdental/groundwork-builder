@@ -139,6 +139,16 @@ Your job is to **preserve the existing content** as faithfully as possible and o
 ## Core principle
 The practice's own words are more trustworthy than anything you could write. Prefer their exact phrasing. Only write new copy where a section is genuinely empty on the original site, and even then, keep it conservative and factual — never speculate about awards, patient counts, years of experience, or philosophy the practice didn't express themselves.
 
+## Voice (always)
+
+Write the way a helpful person at the front desk would talk. State what happens. Stop there.
+
+Do not perform honesty or distinctiveness. If a fact is true, say it once in plain words. Do not add a clause that proves you are being real ("so you can see what we see", "not a slogan", "the visit is clear", "before anyone starts").
+
+Avoid: actually, the truth is, unlike other offices, not just, we don't guess, a plan you can already see. Those are tells that the copy is trying.
+
+If you cannot add a fact, write less. Never write a thesis about the practice's character.
+
 ## Practice Profile
 
 **Practice Name:** {{practiceName}}
@@ -192,20 +202,43 @@ Short labels of facts that distinguish this practice — technology, awards, lan
 
 {{existingFAQs}}
 
+### FAQ instruction for this practice
+
+{{faqInstruction}}
+
 ## Existing Stats
 
 {{stats}}
 
 ## Instructions
 
-### Source priority for every section
+### Source priority
 
-When deciding what content to use for any section, follow this priority order:
+Priority depends on the kind of section. Use the matching list — do not apply the
+narrative order to service intros.
 
-1. **additionalContent[]** — verbatim prose from the practice. If a block matches the section (e.g. a "philosophy" type for the about/philosophy field, a "welcome" type for hero, an "office-tour" block for an office section), use it directly. This is the practice's actual voice.
-2. **Scraped service page content** — for service descriptions, the verbatim text from the matching service page is the authoritative source.
-3. **pageInventory excerpts** — fallback for sections without a direct additionalContent or scraped service match.
-4. **null** — if nothing on the site addresses this section, return null. Do NOT generate generic dental copy to fill the gap.
+**For `services.<slug>` (headline / subheadline / intro):**
+
+1. **The service's own source page** under "Scraped Service Page Content" — the
+   authoritative source. Copy its sentences verbatim. This outranks
+   additionalContent for service copy.
+2. **additionalContent[]** — only when the source page is thin or absent, and only
+   for a block that actually discusses this service.
+3. **null** — no source page and nothing relevant in additionalContent. Return null.
+   Do NOT write generic dental copy to fill the gap.
+
+**For narrative sections (hero, about, philosophy, locations):**
+
+1. **additionalContent[]** — verbatim prose from the practice. If a block matches the
+   section (a "philosophy" type for about/philosophy, a "welcome" type for hero, an
+   "office-tour" block for an office section), use it directly. This is their actual voice.
+2. **pageInventory excerpts** — fallback when no additionalContent block matches.
+3. **null** — if nothing on the site addresses this section, return null.
+
+**When one source page backs several services** (its header lists more than one slug),
+each intro still comes from that page — lead each with the sentences specific to that
+service. Say less rather than paraphrasing into generic copy; do not invent
+differences between them to make them look distinct.
 
 ### Per-section instructions
 
@@ -217,7 +250,7 @@ When deciding what content to use for any section, follow this priority order:
 
    **Fallback for thin service pages:** if the scraped service page is sparse (under 50 words of body text, mostly nav/headings, or an empty stub), do NOT immediately return `intro: null`. First check the `additionalContent` block for any prose tagged with a matching `source` (e.g. an "office-tour" block from `/about` mentioning the service, a "philosophy" block touching on this care, a `technology` block describing the equipment used). If you find relevant prose, use it — and record `quality: adequate, action: optimize` in the audit. Only return `intro: null` (and `action: create`) when neither the service page NOR additionalContent has anything relevant.
 
-4. **FAQs**: Use existing FAQs verbatim. If none exist, you may write 3-4 only if they are answerable from information on the site (hours, location, services offered). Do not invent answers about insurance, pricing, or procedures.
+4. **FAQs**: Follow the FAQ instruction above. When the practice already has FAQs, return `"faqs": []` — they are carried over verbatim by a later step and anything you write competes with the real answers. Only when the site has none may you write 3-5, and only from facts already on the site. Never invent answers about insurance, pricing, or procedures.
 
 5. **Blog topics**: Suggest topics only based on services actually listed on the site + the practice's city. Reference differentiators when relevant (a "Spanish & Vietnamese spoken" differentiator could seed a "Multilingual Care for Long Beach Families" topic).
 
@@ -281,7 +314,7 @@ For the `services` object: include one entry for **each of these exact slugs**: 
 
 Use the slug exactly as listed (e.g. `dental-crowns`, `exam-cleaning`) as the JSON key — this is how the site wires up descriptions to pages.
 
-For `faqs`: only include FAQs you can answer from the existing site content. 3-4 max if no existing FAQs found.
+For `faqs`: `[]` when the practice already has FAQs. Otherwise 3-5 max, answerable from existing site content only.
 
 For `blogTopics`: 4-5 topics max, relevant to their actual services and city.
 

@@ -193,7 +193,23 @@ Runs on **existing site data** (bronze + silver + intake). This is the pre-build
 
 The **site audit** and **PageSpeed** scores feed `external-report.html` (client-facing) and `one-pager.html` (pitch). These are the before-state artifacts clients see.
 
-**Brand DNA** produces `{ color, typography, mood, archetype }`. If it returns null, the pipeline keeps the scraped brand.
+**Brand DNA** produces `{ color, typography, shape, elevation, rationale }`. Colors: **small identity anchor** from the scrape (usually primary hue) with **strong elevation** — not mood→palette tables, not 1:1 scrape copy. Prompt loads thin `skills/design.md` + `design-principles-core` §A only (`taste-frontend.md` is not injected). **Fonts** always come from curated pairings or catalog `--reference` type bucket; **shape/elevation/variants** from catalog `entry.json` when `--reference` is set. If brand-dna returns null, scraped colors + curated fonts still apply.
+
+**What the original site supplies for rebuild:** text/narrative content, images/logo, and a thin aesthetic anchor (colors). Layout, variants, and typography come from templates / design catalog.
+
+### Design judgment levers (where to inject new best practices)
+
+| If you learn… | Edit |
+|---------------|------|
+| Universal ban / floor tenet | `scripts/pipeline/skills/design-principles-core.md` **and** matching rule/id in `lib/audit/anti-slop.js` |
+| Practice identity elevation policy | `scripts/pipeline/skills/design.md` + `lib/brand/prompts/brand-dna.md` |
+| Template look (type, atoms, variants, fidelity) | `docs/design-catalog/runs/<id>/entry.json` |
+| Section craft detail | Impeccable refs under `src/skills/impeccable/.../reference/` (via `lib/impeccable.js`) |
+| Font diversity | `lib/brand/font-pairings.js` |
+| Soft director inspo/anti | `config/design-library-catalog.json` |
+| Agent scoring | `config/rubric.json` / catalog `audit` |
+
+Do **not** put client-build rules in repo-root `design.md` / `DESIGN.md` (Groundwork’s own marketing site). `docs/design/DESIGN_RULES.md` and `taste-frontend.md` are references until wired or promoted into the table above.
 
 **Content Map + Write** runs as two steps: Map audits existing content quality (keep/optimize/create decisions per section), Write generates copy against the plan. If either fails, the pipeline continues in legacy single-pass mode.
 
@@ -222,7 +238,7 @@ After each ship, `distill-design.js` auto-adds the build as `tag: own` so future
 | Write Design DNA + global CSS | 3a-bis | `src/config/design-dna.ts`, global CSS tokens |
 | Generate pages | 3b | `src/pages/services/<slug>.astro`, services index, about, contact |
 | Redirects | 3b-bis | `public/_redirects` (Cloudflare 301s from old URL structure) |
-| Blog stubs | 3c | `src/content/blog/<slug>.md` |
+| Blog migration + stubs | 3c | `src/content/blog/<slug>.md`. Real posts are ported **verbatim and deterministically** from bronze `contentBlocks` by `lib/blog-migrate.js` — no AI, no cost, original slugs preserved so old URLs redirect to themselves. Keyword stubs generate **only** when the practice has no blog at all. |
 | Agent files | 3c-bis | `public/llms.txt`, `public/llms-full.txt`, `public/.well-known/webmcp.json` |
 | Ensure image alt text | 3c-ter | Fills missing `alt` on `images.items[]` before download (role-based fallbacks) |
 | Download images | 3d | `public/images/` + `image-source.json` sidecar |
@@ -466,3 +482,5 @@ The director picks one variant per section based on archetype. Variants are dete
 - [ ] More fixture archetypes — single-doctor general practice, sparse-content (60%+ `missing`), non-warm tone (clinical/editorial/bold/refined)
 - [ ] DataForSEO warm-lead module — SERP local-pack position, GBP completeness, review velocity, NAP consistency; trigger via manual D1 account flag
 - [x] Cloudflare Worker self-serve "Grade My Site" — homepage HTML checks + PSI + Growth Score JSON (`npm run grade` / `workers/grade-my-site/`; citability still optional follow-up)
+- [ ] **Track internal design template per build** — persist catalog `--reference` id (and/or resolved archetype + variant map) on D1 `builds` / `runs` and in `_pipeline/` summary so ops can filter sites by template, enforce portfolio diversity (hard anti-reuse), and compare quality by template. Today archetype lands in run DNA artifacts / soft `own` fingerprints only; catalog reference id is not a first-class CRM field.
+- [x] **Eval / batch test harness (v1)** — `npm run eval:batch` with preflight (Playwright + Anthropic), concurrency 2–3, `--limit`, hang detection (log heartbeat), per-job logs + batch status.json. Homepage fail-fast + `unable_to_scrape` D1/status.json; `--skip-scrape` reloads artifacts; `--skip-pagespeed` / `--skip-seo-optimize` / `--resume-from agent|seo` wired; reference variant clamp to on-disk enums; design-library index file lock for parallel distill.
