@@ -25,6 +25,9 @@ clients/
 reports-site/public/audits/
 reports-site/public/pitch/
 
+# Local reference imagery for manual comparison — large, machine-local
+_references/
+
 # Local pipeline memory / caches
 _memory/runs.jsonl
 _memory/images/
