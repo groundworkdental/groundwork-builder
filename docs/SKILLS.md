@@ -5,7 +5,7 @@
 >
 > See [`PIPELINE.md`](./PIPELINE.md) for how skills compose into the build flow.
 
-Last generated: 2026-07-24 05:48 UTC
+Last generated: 2026-08-10 05:54 UTC
 
 ## At a glance
 
@@ -14,6 +14,7 @@ Last generated: 2026-07-24 05:48 UTC
 | [_fixtures/README](../skills/_fixtures/README.md) | — | — | — | — |
 | [audit/coverage-audit](../skills/audit/coverage-audit.md) | L4 | 🟡 working | Audit | — |
 | [audit/site-audit](../skills/audit/site-audit.md) | L1 | 🟡 working | Audit | ✓ |
+| [content/architect](../skills/content/architect.md) | L1 | experimental | Architect | ✓ |
 | [content/content-map](../skills/content/content-map.md) | L1 | 🟡 working | ContentMap | ✓ |
 | [content/content-write](../skills/content/content-write.md) | L1 | 🟡 working | ContentWrite | ✓ |
 | [content/cta](../skills/content/cta.md) | L1 | 🟡 working | Generate | ✓ |
@@ -26,7 +27,6 @@ Last generated: 2026-07-24 05:48 UTC
 | [creative/director](../skills/creative/director.md) | L1 | 🟢 polished | Director | ✓ |
 | [extraction/image-roles](../skills/extraction/image-roles.md) | L1 | 🟢 polished | Assemble | — |
 | [extraction/silver](../skills/extraction/silver.md) | L1 | 🟢 polished | Silver | ✓ |
-| [pages/blog-rewrite](../skills/pages/blog-rewrite.md) | L1 | 🟡 working | Generate | ✓ |
 | [pages/service-page](../skills/pages/service-page.md) | L1 | 🟡 working | Generate | ✓ |
 
 ## Skills by phase
@@ -77,11 +77,6 @@ Produce content JSON for the homepage Reviews/Testimonials section.
 
 Produce content JSON for the homepage Services section: heading, optional eyebrow + subheading, and a per-service descriptions list.
 
-#### [pages/blog-rewrite](../skills/pages/blog-rewrite.md)
-*Tier L1 · 🟡 working · Model: `claude-sonnet-4-6` · Source: `scripts/pipeline/lib/ai-blog-rewrite.js` · Function: `rewriteBlogPost()`*
-
-Restructures a scraped blog post (or `additionalContent[]` item of `type: blog-post`) into a clean Markdown body for the rebuilt site.
-
 #### [pages/service-page](../skills/pages/service-page.md)
 *Tier L1 · 🟡 working · Model: `claude-sonnet-4-6` · Source: `scripts/pipeline/lib/ai-service-page.js` · Function: `buildPrompt()`*
 
@@ -103,6 +98,11 @@ Strategic recommendations for the redesign.
 
 #### [_fixtures/README](../skills/_fixtures/README.md)
 *Tier — · —*
+
+#### [content/architect](../skills/content/architect.md)
+*Tier L1 · experimental · Model: `claude-sonnet-4-6` · Source: `scripts/pipeline/lib/ai-architect.js` · Function: `runArchitect()`*
+
+Decides the **page set** of the rebuilt site, and assigns every ingested source page a **disposition** — what happened to it and where its content went.
 
 #### [content/content-map](../skills/content/content-map.md)
 *Tier L1 · 🟡 working · Model: `claude-sonnet-4-6` · Source: `scripts/pipeline/lib/ai-content-map.js` · Function: `runContentMap()`*
@@ -211,14 +211,6 @@ Skills with `stub` or `working` maturity that have known gaps — these are your
 - No deduplication if the items array has near-synonyms ("Whitening" + "Teeth Whitening")
 - No category-aware ordering (cosmetic/general/orthodontic clusters not grouped)
 - desc rewrites can drift from the source description
-
-### [pages/blog-rewrite](../skills/pages/blog-rewrite.md) · 🟡 working
-
-- Source-too-thin threshold (200 chars) is a single magic number — doesn't account for legitimately short articles vs. truncated scrapes
-- No detection of duplicate content across multiple URL variants (per-location keyword dupes) — that's handled upstream in `blog-generator.js` via title-normalization
-- Image/asset references in the source body are stripped if they're absolute URLs to the old site
-- No re-localization — if the article references the original city/state, those references stay (which is usually correct)
-- No structured-output mode — model can occasionally include extra prose ar
 
 ### [pages/service-page](../skills/pages/service-page.md) · 🟡 working
 

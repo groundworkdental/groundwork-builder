@@ -82,7 +82,7 @@ blueprint&#39;s <code>contentAudit</code> tells Write what to <strong>keep verba
 <strong>optimize</strong>, and what to <strong>create from scratch</strong> — Write executes those
 decisions.</p>
 <p>Output is the same shape downstream consumers (<code>page-generator.js</code>,
-<code>injector.js</code>, <code>studio.js</code>) already expect — only the path that produces the
+<code>injector.js</code>) already expect — only the path that produces the
 copy has been split into Map (audit) + Write (compose).</p>
 <p><strong>Legacy single-pass mode:</strong> when no blueprint is provided (Map didn&#39;t run, or
 running in a back-compat path), Write infers source/quality/action inline using
@@ -337,14 +337,33 @@ Short labels of facts that distinguish this practice — technology, awards, lan
 
 ## Instructions
 
-### Source priority for every section
+### Source priority
 
-When deciding what content to use for any section, follow this priority order:
+Priority depends on the kind of section. Use the matching list — do not apply the
+narrative order to service intros.
 
-1. **additionalContent[]** — verbatim prose from the practice. If a block matches the section (e.g. a &quot;philosophy&quot; type for the about/philosophy field, a &quot;welcome&quot; type for hero, an &quot;office-tour&quot; block for an office section), use it directly. This is the practice&#39;s actual voice.
-2. **Scraped service page content** — for service descriptions, the verbatim text from the matching service page is the authoritative source.
-3. **pageInventory excerpts** — fallback for sections without a direct additionalContent or scraped service match.
-4. **null** — if nothing on the site addresses this section, return null. Do NOT generate generic dental copy to fill the gap.
+**For `services.&lt;slug&gt;` (headline / subheadline / intro):**
+
+1. **The service&#39;s own source page** under &quot;Scraped Service Page Content&quot; — the
+   authoritative source. Copy its sentences verbatim. This outranks
+   additionalContent for service copy.
+2. **additionalContent[]** — only when the source page is thin or absent, and only
+   for a block that actually discusses this service.
+3. **null** — no source page and nothing relevant in additionalContent. Return null.
+   Do NOT write generic dental copy to fill the gap.
+
+**For narrative sections (hero, about, philosophy, locations):**
+
+1. **additionalContent[]** — verbatim prose from the practice. If a block matches the
+   section (a &quot;philosophy&quot; type for about/philosophy, a &quot;welcome&quot; type for hero, an
+   &quot;office-tour&quot; block for an office section), use it directly. This is their actual voice.
+2. **pageInventory excerpts** — fallback when no additionalContent block matches.
+3. **null** — if nothing on the site addresses this section, return null.
+
+**When one source page backs several services** (its header lists more than one slug),
+each intro still comes from that page — lead each with the sentences specific to that
+service. Say less rather than paraphrasing into generic copy; do not invent
+differences between them to make them look distinct.
 
 ### Per-section instructions
 

@@ -75,13 +75,13 @@
 <body>
 <header class="top">
   <h1>Pipeline · Skills Dashboard</h1>
-  <p>17 skills across 9 phases · auto-generated 2026-07-24 05:48 UTC</p>
+  <p>17 skills across 9 phases · auto-generated 2026-08-10 05:54 UTC</p>
 </header>
 
 <div class="stats">
   <div class="stat"><span class="stat-num">17</span><span class="stat-label">Total skills</span></div>
   <div class="stat"><span class="stat-num stub">0</span><span class="stat-label">Stub</span></div>
-  <div class="stat"><span class="stat-num working">12</span><span class="stat-label">Working</span></div>
+  <div class="stat"><span class="stat-num working">11</span><span class="stat-label">Working</span></div>
   <div class="stat"><span class="stat-num polished">4</span><span class="stat-label">Polished</span></div>
   <div class="stat"><span class="stat-num mature">0</span><span class="stat-label">Mature</span></div>
 </div>
@@ -182,17 +182,17 @@
           <span class="phase-num">4</span>
           <h2>Define Brand</h2>
         </header>
-        <p class="phase-summary">Defines the rebuild&#39;s visual identity (brand-dna) by ELEVATING the practice&#39;s OBSERVED current design — never a category template. AI decides the palette (evolved from the real site colors — grounded, so it stays distinctive), shape, and elevation. FONTS are NOT picked by the LLM (that converges on one safe font every time): instead a deterministic, character-bucketed, per-practice-hash-seeded pairing is chosen from a curated set of vetted modern Google pairs. applyBrandToMerged writes merged.brand.{colors,roles,fonts}. Replaces the old Design-Extract + Brand-Direction split.</p>
+        <p class="phase-summary">Defines practice COLOR identity (brand-dna): small scrape anchor (usually primary hue) + strong elevation — not mood→palette recipes, not scrape-cloning, not category dental defaults. Thin skills/design.md + design-principles-core §A only (taste-frontend is NOT injected). FONTS from curated seeded pairings; catalog --reference overwrites type bucket + shape/elevation. applyBrandToMerged writes merged.brand.{colors,roles,fonts}.</p>
         
       <div class="phase-io">
-        <div><span class="io-label">In</span><span class="io-val">merged.currentDesign (palette/type/mood observed by the silver design pass) + design-principles core</span></div>
+        <div><span class="io-label">In</span><span class="io-val">merged.currentDesign + skills/design.md (identity) + design-principles-core §A (floor)</span></div>
         <div class="io-arrow">↓</div>
         <div><span class="io-label">Out</span><span class="io-val">brandDna { color{8 roles}, typography{families + scale}, shape, elevation, rationale } → merged.brand</span></div>
         
       </div>
         <details class="phase-detail">
            <summary>Tools · QC · cost</summary>
-           <dl><dt>Tools</dt><dd><code>Anthropic Sonnet 4.6</code>, <code>lib/brand/brand-dna.js</code>, <code>lib/brand/font-pairings.js (deterministic + seeded)</code>, <code>lib/assemble/brand-tokens.js</code></dd><dt>QC</dt><dd><span class="qc-item">WCAG AA (enforced in prompt + verified by brand-eval)</span><span class="qc-item">No category templating (elevate, don&#39;t reinvent)</span><span class="qc-item">Fonts convergence-proof (curated + seeded, not LLM-chosen)</span></dd><dt>Cost</dt><dd>Sonnet — single call</dd><dt>Skip flag</dt><dd><code>--skip-design</code></dd></dl>
+           <dl><dt>Tools</dt><dd><code>Anthropic Sonnet 4.6</code>, <code>lib/brand/brand-dna.js</code>, <code>lib/brand/font-pairings.js</code>, <code>lib/assemble/brand-tokens.js</code>, <code>optional reference-entry.js</code></dd><dt>QC</dt><dd><span class="qc-item">WCAG AA in prompt</span><span class="qc-item">No category / mood→palette templating</span><span class="qc-item">Fonts convergence-proof (curated + seeded)</span></dd><dt>Cost</dt><dd>Sonnet — single call</dd><dt>Skip flag</dt><dd><code>--skip-design</code></dd></dl>
          </details>
         <div class="phase-section">
            <h3 class="phase-section-h">Skills</h3>
@@ -281,7 +281,7 @@
            <dl><dt>Tools</dt><dd><code>Anthropic Sonnet 4.6</code>, <code>skill-loader.js (renders prompts from skill .md files)</code>, <code>variant component library</code></dd><dt>QC</dt><dd><span class="qc-item">JSON schema parse</span><span class="qc-item">Locked-field enforcement (doctor name, credentials)</span><span class="qc-item">No-fabrication rules in prompts</span></dd><dt>Cost</dt><dd>Sonnet — one call per section + one per service page</dd><dt>Skip flag</dt><dd><code>--skip-generate</code></dd></dl>
          </details>
         <div class="phase-section">
-           <h3 class="phase-section-h">Skills <span class="count">(8)</span></h3>
+           <h3 class="phase-section-h">Skills <span class="count">(7)</span></h3>
            <ul class="skills">
         <li class="skill" data-maturity="working">
           <a href="./skills/content-cta.html" class="skill-name">content/cta</a>
@@ -330,14 +330,6 @@
             <span class="maturity">🟡 working</span>
           </span>
           <p class="skill-resp">Produce content JSON for the homepage Services section: heading, optional eyebrow + subheading, and a per-service descriptions list.</p>
-        </li>
-        <li class="skill" data-maturity="working">
-          <a href="./skills/pages-blog-rewrite.html" class="skill-name">pages/blog-rewrite</a>
-          <span class="skill-meta">
-            <span class="tier tier-L1">L1</span>
-            <span class="maturity">🟡 working</span>
-          </span>
-          <p class="skill-resp">Restructures a scraped blog post (or `additionalContent[]` item of `type: blog-post`) into a clean Markdown body for the rebuilt site.</p>
         </li>
         <li class="skill" data-maturity="working">
           <a href="./skills/pages-service-page.html" class="skill-name">pages/service-page</a>

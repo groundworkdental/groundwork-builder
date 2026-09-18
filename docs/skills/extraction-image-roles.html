@@ -144,7 +144,7 @@ when present, otherwise role-based fallbacks from <code>ensure-image-alts.js</co
 </ul>
 <h2>Known gaps</h2>
 <ul>
-<li><code>ai-image-roles.js</code> still exists in the repo as dead legacy; do not call it from the pipeline</li>
+<li>Legacy Vision classifier moved to <code>scripts/pipeline/lib/_legacy/ai-image-roles.js</code> — do not import</li>
 <li>Gallery page population is handled by <code>a11y-optimize.js</code> (Phase 3f), not this skill</li>
 <li>Decorative roles (<code>unused</code>) intentionally get empty alt</li>
 </ul>

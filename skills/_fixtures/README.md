@@ -25,7 +25,7 @@ _fixtures/<practice-slug>/
 Run the full pipeline on a known practice:
 
 ```bash
-node scripts/pipeline/test-silver.js       --url https://example.com
+node scripts/pipeline/_test/test-silver.js       --url https://example.com
 node scripts/pipeline/test-content-map.js  --silver /tmp/silver-test/silver.json
 node scripts/pipeline/test-director.js     --silver /tmp/silver-test/silver.json
 ```
