@@ -872,6 +872,57 @@ function checkStaleConditionalCopy(pages, config) {
 }
 
 /**
+ * A generated repo must not ship the generator's own inputs or docs.
+ *
+ * intake.json shipped in the first client repo as a leftover pipeline input.
+ * No code in that repo read it, and it had gone stale — still naming the
+ * wrong primary doctor with an empty address, while site.ts held the correct
+ * doctor and suite. A second copy of a fact that nothing reads is a fact the
+ * next person to open the repo will believe.
+ *
+ * The generated README had the same shape: it described a docs/ tree,
+ * scripts/pipeline/ and GBP automation that exist in the generator and not in
+ * the client repo, so its relative links were dead on arrival.
+ */
+async function checkGeneratorLeakage(clientDir) {
+  const LEAKED = ['intake.json', '_pipeline', 'GENERATOR-NOTES.md'];
+  const found = [];
+  for (const name of LEAKED) {
+    if (await exists(join(clientDir, name))) found.push(name);
+  }
+
+  const readme = await readMaybe(join(clientDir, 'README.md'));
+  const dead = [];
+  if (readme) {
+    for (const m of readme.matchAll(/\]\(([^)#:]+)\)/g)) {
+      const target = m[1].trim();
+      if (!target || target.startsWith('http') || target.startsWith('mailto:')) continue;
+      if (!(await exists(join(clientDir, target.replace(/^\.\//, ''))))) dead.push(target);
+    }
+  }
+
+  if (found.length || dead.length) {
+    const parts = [];
+    if (found.length) {
+      parts.push(
+        `generator input(s) present: ${found.join(', ')} — nothing here reads them, ` +
+          `and they drift against config`,
+      );
+    }
+    if (dead.length) {
+      parts.push(
+        `${dead.length} README link(s) resolve to nothing in this repo: ` +
+          `${[...new Set(dead)].slice(0, 4).join(', ')}`,
+      );
+    }
+    fail('generator leakage', parts.join('; '));
+    return;
+  }
+  pass('generator leakage', readme ? 'no generator inputs, README links resolve' : 'no generator inputs');
+}
+
+
+/**
  * A built 404.html is what makes Pages answer 404 at all.
  *
  * With none, it falls back to index.html with a 200 for unmatched routes, so
@@ -937,6 +988,7 @@ async function main() {
   await checkImageSets(clientDir);
   await checkWranglerVars(clientDir);
   await checkConfigBypass(clientDir);
+  await checkGeneratorLeakage(clientDir);
   checkStaleConditionalCopy(pages, await readMaybe(join(clientDir, 'src', 'config', 'site.ts')));
 
   const failed = results.filter((r) => !r.ok);

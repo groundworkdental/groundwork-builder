@@ -1,8 +1,8 @@
-/* Colour tokens — the single place values exist.
+/* Color tokens — the single place values exist.
    The pipeline regenerates this file per client (injector.js → writeTokensCss);
    these defaults are what the template ships standalone.
 
-   Tailwind v4 reads colours from @theme. tailwind.config.mjs carries none.
+   Tailwind v4 reads colors from @theme. tailwind.config.mjs carries none.
 
    Context classes below override the SAME --color-* names. That detail is the
    whole design and is easy to get subtly wrong: do NOT add an indirection like
@@ -10,26 +10,26 @@
    context. A custom property's var() references resolve at the element that
    DECLARES it, so the root value is baked in and inherited — measured in a
    browser, plain text-brand-primary stayed rgb(27,58,92) inside a dark context
-   while the opacity variant correctly changed. Half the utilities honour the
+   while the opacity variant correctly changed. Half the utilities honor the
    theme, half don't, and the CSS looks fine either way.
 
    Verify changes here with getComputedStyle on both a plain and an
    opacity-modified utility. */
 
 /* KNOWN LIMIT — opacity modifiers do not follow a context switch.
-   Tailwind v4 constant-folds an opacity modifier when the theme colour is a
+   Tailwind v4 constant-folds an opacity modifier when the theme color is a
    literal: bg-brand-primary/10 compiles to #1b3a5c1a, not to a var(), so it
-   keeps the light-ground colour inside .section-dark.
+   keeps the light-ground color inside .section-dark.
 
    Every alternative is worse. Measured:
      --color-x: rgb(var(--c-x))  → plain utility bakes at root; context is
                                    ignored by the MAJORITY of utilities
      --color-x: var(--p-x)       → opacity is dropped entirely
-     --color-x: #1B3A5C          → plain honours context; only the opacity
+     --color-x: #1B3A5C          → plain honors context; only the opacity
                                    variant bakes   ← what we ship
 
    So inside a dark band, reach for an explicit token (text-brand-on-dark)
-   rather than an opacity-modified brand colour. */
+   rather than an opacity-modified brand color. */
 
 @theme {
   --color-brand-primary:   #1B3A5C;
@@ -58,7 +58,7 @@
 /* Dark band. Add to any section sitting on the dark ground; everything inside
    resolves correctly with no per-component overrides and no dark variants.
 
-   Correcting a colour for AA on a light ground pushes it away from AA on a
+   Correcting a color for AA on a light ground pushes it away from AA on a
    dark one, so each ground carries its own counterpart — the accent darkened
    to pass on white measures 3.21:1 here without one. */
 .section-dark {
