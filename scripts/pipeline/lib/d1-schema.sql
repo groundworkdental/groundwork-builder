@@ -177,3 +177,40 @@ CREATE INDEX IF NOT EXISTS idx_sourced_weakness ON sourced_practices (weakness_s
 -- Design-library fingerprints are folded into accounts.design_profile (JSON),
 -- not a separate table. The latest fingerprint per practice lives there; the
 -- source of truth remains _memory/library/<slug>.json.
+
+-- ---------------------------------------------------------------------------
+-- client_events — one timeline per practice, whatever the source
+-- ---------------------------------------------------------------------------
+--
+-- accounts/audits/builds/runs record what the PIPELINE did. Nothing recorded
+-- what a person did: an email, a manual fix, a decision on a call. That
+-- knowledge lived in working trees, commit messages and chat sessions, and
+-- died with them — which is how a twelve-rule document had ten rules adopted
+-- and two silently dropped for a week.
+--
+-- Append-only. Rows are never updated except to close a triage (see below).
+--
+-- The triage columns are the point. A `change` event with systemic = NULL is
+-- UNTRIAGED: nobody has answered "would this defect exist on the next site we
+-- build?". A change with systemic = 'yes' and routed_to = NULL is triaged but
+-- UNROUTED: the generalisable fix has no home yet. Both states are queryable,
+-- so the follow-through that always gets skipped becomes a list instead of a
+-- memory.
+CREATE TABLE IF NOT EXISTS client_events (
+  id          TEXT PRIMARY KEY,
+  slug        TEXT NOT NULL,          -- accounts.slug
+  occurred_at TEXT NOT NULL,          -- ISO 8601, when it HAPPENED
+  kind        TEXT NOT NULL,          -- communication|change|decision|run|gate|launch|note
+  direction   TEXT,                   -- in|out, for communication
+  actor       TEXT NOT NULL,          -- operator email, 'pipeline', or an agent name
+  summary     TEXT NOT NULL,          -- one line, human-readable
+  detail      TEXT,                   -- body, diff, JSON — anything longer
+  source_ref  TEXT,                   -- commit sha, PR url, message id, build id
+  systemic    TEXT,                   -- yes|no|NULL(untriaged) — changes only
+  routed_to   TEXT,                   -- PR url, gate name, rule id
+  created_at  TEXT NOT NULL           -- when the row was written
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_slug     ON client_events (slug, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_events_kind     ON client_events (kind);
+CREATE INDEX IF NOT EXISTS idx_events_systemic ON client_events (systemic);
