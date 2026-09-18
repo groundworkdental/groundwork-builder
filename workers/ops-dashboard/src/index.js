@@ -1,5 +1,21 @@
 // ops-dashboard — Cloudflare Worker
-// Served at ops.groundworkdental.com, protected by Cloudflare Access (no auth logic here).
+//
+// Serves the whole ops ledger: client communications, accounts, audits,
+// builds, prospect pipeline. It must never be reachable by the public.
+//
+// It previously said it was "protected by Cloudflare Access (no auth logic
+// here)" and carried no check for that being true. It was deployed before
+// Access was configured, and for a few minutes answered unauthenticated
+// requests with real client data. The assumption was correct and the
+// verification was missing — the same shape of defect as a consent line that
+// defaults to true, or a site asserting worksFor for a doctor it never
+// checked.
+//
+// So it now fails CLOSED. Access puts a signed Cf-Access-Jwt-Assertion header
+// on every request it forwards; without one, this serves nothing. Deploying
+// without Access in front now produces a dead dashboard rather than a public
+// one.
+//
 // D1 binding: env.DB  (database_name = "groundwork-ops")
 
 // ---------------------------------------------------------------------------
@@ -13,6 +29,20 @@ export default {
     // (which only guards ops.groundworkdental.com). Refuse to serve on it.
     if (url.hostname.endsWith('.workers.dev')) {
       return new Response('Forbidden — use ops.groundworkdental.com', { status: 403 });
+    }
+
+    // Fail closed. Access sets this header on everything it forwards; nothing
+    // else can, because the hostname is proxied and the origin is this worker.
+    // ALLOW_UNAUTHENTICATED exists for `wrangler dev` and is deliberately not
+    // set in wrangler.toml, so production cannot acquire it by accident.
+    if (env.ALLOW_UNAUTHENTICATED !== 'true' && !request.headers.get('Cf-Access-Jwt-Assertion')) {
+      return new Response(
+        'Forbidden — no Cloudflare Access assertion on this request.\n\n' +
+        'This dashboard serves client data and refuses to run without Access in\n' +
+        'front of it. Configure a Zero Trust Access application for this hostname,\n' +
+        'or set ALLOW_UNAUTHENTICATED=true for local development only.\n',
+        { status: 403, headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
+      );
     }
     if (url.pathname.startsWith('/api/')) return handleApi(url, env);
     return serveUI(env);
