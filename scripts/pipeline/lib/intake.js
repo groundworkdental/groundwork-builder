@@ -88,6 +88,20 @@ async function loadFromAirtable(slug) {
   );
 }
 
+/**
+ * Flatten the intake's social{} object into a deduped URL list.
+ * Keys are platform names (facebook, instagram, yelp, healthgrades,
+ * google_maps); only non-empty http(s) values survive.
+ */
+function socialUrls(social) {
+  if (!social || typeof social !== 'object') return [];
+  return [...new Set(
+    Object.values(social)
+      .filter(v => typeof v === 'string' && /^https?:\/\//i.test(v.trim()))
+      .map(v => v.trim()),
+  )];
+}
+
 function normalizeIntake(raw) {
   const pi = raw.practice_info || raw._topLevel || {};
   const dt = raw.doctor_team || {};
@@ -102,6 +116,14 @@ function normalizeIntake(raw) {
       domain: pi.domain || null,
       phone: pi.phone || pi.contact_phone || null,
       email: pi.email || pi.contact_email || null,
+      // The practice's own booking software (Dentrix, Zocdoc, NexHealth...).
+      // Collected by the intake template but, until now, read by nothing —
+      // so a practice that told us its booking URL still shipped without one
+      // unless the scraper happened to find it.
+      bookingUrl: co.scheduling_url || pi.scheduling_url || null,
+      // Social/profile URLs become schema sameAs[] and footer links. Same
+      // story: the template asks for five of them and dropped all five.
+      sameAs: socialUrls(co.social),
     },
     doctor: dt.primary_doctor ? {
       firstName: dt.primary_doctor.first_name || null,
@@ -131,12 +153,18 @@ function normalizeIntake(raw) {
     },
     content: {
       insurance: ins.plans || [],
-      faqs: co.faqs || [],
-      testimonials: co.testimonials || [],
+      financing: ins.financing || [],
+      faqs: (co.faqs || []).filter(f => f?.question),
+      testimonials: (co.testimonials || []).filter(t => t?.body || t?.text),
       caseStudyConsent: co.case_study_consent ?? raw.case_study_consent ?? null,
       consentScope: co.consent_scope ?? raw.consent_scope ?? null,
       ga4MeasurementId: co.ga4_measurement_id || null,
+      philosophy: co.philosophy || null,
+      practiceDescription: co.practice_description || pi.description || null,
+      tagline: co.tagline || pi.tagline || null,
+      additionalContent: co.additional_content || [],
     },
+    differentiators: Array.isArray(raw.differentiators) ? raw.differentiators : [],
     meta: {
       intakeSource: raw.meta?.intakeSource || (raw._topLevel ? 'd1' : 'file'),
     },

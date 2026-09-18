@@ -14,6 +14,11 @@ const tests = [
   'test-reference-entry.js',
   'test-grade-homepage.js',
   'test-fixtures.js',
+  'test-generators.js',
+  'test-crawl-select.js',
+  'test-faq-repair.js',
+  'test-silver-fidelity.js',
+  'test-intake-passthrough.js',
 ];
 
 let failed = 0;

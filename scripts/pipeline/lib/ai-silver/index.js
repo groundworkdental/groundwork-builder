@@ -29,6 +29,11 @@ import * as images       from './passes/images.js';
 import * as content      from './passes/content.js';
 import * as design        from './passes/design.js';
 import { resolveAffiliations, cleanBadgeBucket } from './affiliations.js';
+import { formatNarrative } from './shared.js';
+import { sanitizeHours } from './hours-sanity.js';
+import { filterDoctors } from './provider-filter.js';
+import { repairFaqs } from './faq-repair.js';
+import { isBlogPath } from '../crawl-select.js';
 
 const PASSES = [
   contact,
@@ -64,7 +69,7 @@ function emptySilver(bronze) {
     practice: {
       name: null, alternateName: null, legalName: null, description: null, schemaType: null,
       domain, phone: null, fax: null, email: null,
-      googleReviewLink: null, googleProfileLink: null, patientPortalUrl: null, priceRange: '$$',
+      googleReviewLink: null, googleProfileLink: null, patientPortalUrl: null, bookingUrl: null, priceRange: '$$',
       medicalSpecialty: null, schemaType: null, alternateName: null, description: null,
       mission: null, tagline: null, sameAs: [],
     },
@@ -239,21 +244,51 @@ function applyBackCompat(silver) {
   if (gpl && !/google\.|g\.page|goo\.gl|maps\.app/i.test(gpl)) {
     silver.practice.googleProfileLink = null;
   }
+
+  // Hours sanity (defense in depth if contact pass missed it)
+  if (silver.hours) {
+    sanitizeHours(silver.hours);
+  }
+
+  // Provider gate (defense in depth)
+  if (silver.doctors?.length) {
+    const { doctors, dropped } = filterDoctors(silver.doctors, { softDups: [] });
+    // softDups already applied in providers pass; here only re-apply name/bio gates
+    if (dropped.length) silver.doctors = doctors;
+  }
 }
 
 function buildPageInventory(bronze) {
-  return (bronze.pages || []).map(p => ({
-    url: p.url,
-    path: p.path,
-    title: p.title,
-    metaDesc: p.metaDescription,
-    h1: p.headings?.find(h => h.level === 1)?.text || null,
-    h2s: p.headings?.filter(h => h.level === 2).map(h => h.text) || [],
-    h3s: p.headings?.filter(h => h.level === 3).map(h => h.text) || [],
-    paragraphs: (p.paragraphs || []).slice(0, 5),
-    wordCount: p.wordCount,
-    bodyText: (p.bodyText || '').slice(0, 4000),
-  }));
+  return (bronze.pages || []).map(p => {
+    const narrative = formatNarrative(p, 3500);
+    // Prefer narrative-derived excerpts so inventory isn't disconnected lists
+    const fromBlocks = [];
+    for (const sec of p.sections || []) {
+      for (const block of sec.blocks || []) {
+        if (block.type === 'paragraph') fromBlocks.push(block.text);
+        else if (block.type === 'list') fromBlocks.push(...(block.items || []));
+      }
+    }
+    return {
+      url: p.url,
+      path: p.path,
+      title: p.title,
+      metaDesc: p.metaDescription,
+      h1: p.headings?.find(h => h.level === 1)?.text
+        || p.contentBlocks?.find(b => b.type === 'heading' && b.level === 1)?.text
+        || null,
+      h2s: (p.headings?.filter(h => h.level === 2).map(h => h.text)
+        || p.contentBlocks?.filter(b => b.type === 'heading' && b.level === 2).map(b => b.text)
+        || []),
+      h3s: (p.headings?.filter(h => h.level === 3).map(h => h.text)
+        || p.contentBlocks?.filter(b => b.type === 'heading' && b.level === 3).map(b => b.text)
+        || []),
+      paragraphs: (fromBlocks.length ? fromBlocks : (p.paragraphs || [])).slice(0, 12),
+      narrative,
+      wordCount: p.wordCount,
+      bodyText: narrative || (p.bodyText || '').slice(0, 4000),
+    };
+  });
 }
 
 function buildPagesList(bronze) {
@@ -280,7 +315,17 @@ export async function extractSilver(bronze) {
     return emptySilver(bronze);
   }
 
-  console.log(`[ai-silver] starting multi-pass extraction (${bronze.pages.length} pages, ${PASSES.length} passes)`);
+  // Blog posts are migration material — ported verbatim by blog-generator, never
+  // rewritten. Extracting from them would send an entire archive through the AI
+  // passes (content.js takes any page over 400 words, which every post clears)
+  // and would bloat pageInventory for every downstream prompt. Hold them back
+  // here so `bronze.pages` stays the rebuild reference set.
+  const blogPages = bronze.pages.filter(p => isBlogPath(p.path));
+  const referenceBronze = blogPages.length
+    ? { ...bronze, pages: bronze.pages.filter(p => !isBlogPath(p.path)) }
+    : bronze;
+
+  console.log(`[ai-silver] starting multi-pass extraction (${referenceBronze.pages.length} reference pages, ${blogPages.length} blog pages held for verbatim migration, ${PASSES.length} passes)`);
   const startedAt = Date.now();
 
   // Fire all passes in parallel. Each pass is responsible for selecting its
@@ -288,8 +333,8 @@ export async function extractSilver(bronze) {
   const passResults = await Promise.all(PASSES.map(async (pass) => {
     const passStarted = Date.now();
     try {
-      const pages = pass.selectPages(bronze);
-      const slice = await pass.run({ bronze, pages });
+      const pages = pass.selectPages(referenceBronze);
+      const slice = await pass.run({ bronze: referenceBronze, pages });
       const ms = Date.now() - passStarted;
       console.log(`[ai-silver:${pass.name}] ok (${pages.length} pages → slice in ${ms}ms)`);
       return { name: pass.name, slice, ms };
@@ -305,10 +350,24 @@ export async function extractSilver(bronze) {
   for (const r of passResults) mergeSlice(silver, r.slice);
   applyBackCompat(silver);
 
+  // Deterministic backstop for the faqs pass. Runs after the merge so it sees
+  // the FAQs that actually landed, not the slice a single pass produced.
+  const faqRepair = repairFaqs(silver, referenceBronze.pages);
+  if (faqRepair.added) {
+    console.log(`[ai-silver:faq-repair] recovered ${faqRepair.added} Q+A the faqs pass dropped: `
+      + faqRepair.repaired.map((r) => `${r.path} (+${r.added})`).join(', '));
+  }
+
   // Pass metrics + page inventory + migration urls
   silver.meta.passMetrics = Object.fromEntries(passResults.map(r => [r.name, { ms: r.ms, error: r.error || null }]));
+  // The additionalContent ceiling that applied to this run, so headroom can be
+  // measured against the real number rather than a constant copied by hand.
+  const acCap = passResults.find(r => r.name === 'content')?.slice?.acCap;
+  if (acCap) silver.meta.additionalContentCap = acCap;
   silver.meta.totalMs = Date.now() - startedAt;
-  silver.pageInventory = buildPageInventory(bronze);
+  // pageInventory feeds Content Map / Content Write prompts, so it stays the
+  // reference set too — a full blog archive here would dominate those prompts.
+  silver.pageInventory = buildPageInventory(referenceBronze);
   if (!silver.pages.length) silver.pages = buildPagesList(bronze);
   silver.migration.oldUrls = (bronze.siteAssets?.allUrls || []).slice();
 
