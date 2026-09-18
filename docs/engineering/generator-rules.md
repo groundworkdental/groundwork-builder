@@ -35,7 +35,7 @@ build output and fails on anything missing.
 
 | Rule | Where | Status |
 |---|---|---|
-| **1.** Never ship a claim the build cannot verify | `BeforeAfter.astro` needs `provenance` as a required prop with no default, union-typed, rendering its own on-page disclosure | **queued** |
+| **1.** Never ship a claim the build cannot verify | `BeforeAfter.astro` — `provenance` is a required union-typed prop with no default; each card renders its own disclosure; an absent or invalid value throws at build time | **done** |
 | **3.** Generate derived text files, do not template them | `llms.txt` / `llms-full.txt` from config, like `robots.txt` already is | **queued** |
 | **6.** `tel:` from digits, schema in E.164 | config carries `phone` and `phoneDigits`; templates never interpolate the display string into an href | **queued** |
 | **7.** Attribution hook on every conversion link | `data-*-location` on conversion links, read by the GA4 handler | **partly** — handlers exist, hooks are inconsistent |

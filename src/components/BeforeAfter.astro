@@ -1,9 +1,48 @@
 ---
+/**
+ * Before-and-after gallery.
+ *
+ * CONSENT IS PER-IMAGE AND REQUIRED. This component used to print
+ * "Photos shown with patient consent" once, at section level, for whatever it
+ * was handed — so rendering it with a vendor render or a stock photo asserted
+ * documented patient consent that did not exist. Texas dental advertising
+ * rules and ADA guidance both require before/after imagery to be actual
+ * unretouched photographs of the practice's own patients, used with consent.
+ * That claim is regulatory, not decorative, and it shipped on a live practice
+ * site defaulting to true.
+ *
+ * `provenance` is therefore a required field with no default. Every item
+ * declares what it actually is, and each card renders the disclosure matching
+ * its own value. There is no way to pass an image and get the wrong
+ * disclaimer, because there is no way to pass an image without declaring
+ * provenance.
+ *
+ *   provenance: 'patient'      → a real case, consent on file. Rendered as
+ *                                "Actual patient. Photo used with consent."
+ *   provenance: 'illustrative' → a render, vendor asset or stock photo.
+ *                                Rendered as "Illustrative example — not an
+ *                                actual patient of this practice." Never
+ *                                counts as a result.
+ *
+ * To add a provenance kind, add it to DISCLOSURE. The union type then makes
+ * TypeScript flag every call site that has to be updated.
+ */
+
+type Provenance = 'patient' | 'illustrative';
+
 interface GalleryItem {
   before: string;
   after: string;
   beforeAlt: string;
   afterAlt: string;
+  /** Required. What these images actually are — drives the on-page disclosure. */
+  provenance: Provenance;
+  /**
+   * Optional internal reference for the signed photo release (chart number,
+   * form id, date). Never rendered — it exists so the practice can trace a
+   * published patient image back to its consent record during an audit.
+   */
+  consentRef?: string;
   caption?: string;
   procedure?: string;
 }
@@ -17,11 +56,42 @@ const {
   items,
   heading = 'Before & After Results',
 } = Astro.props;
+
+/** Visitor-facing disclosure per provenance kind. Exhaustive by construction. */
+const DISCLOSURE: Record<Provenance, string> = {
+  patient: 'Actual patient. Photo used with consent.',
+  illustrative: 'Illustrative example — not an actual patient of this practice.',
+};
+
+// Fail the build rather than ship an unlabeled or mislabeled result. A typo in
+// provenance would otherwise fall through to `undefined` and render no
+// disclosure at all, which is the exact failure this component exists to
+// prevent. A generator that cannot supply provenance must not render this
+// section.
+for (const [i, item] of items.entries()) {
+  if (!(item.provenance in DISCLOSURE)) {
+    throw new Error(
+      `BeforeAfter: item ${i} (${item.procedure || item.caption || item.before}) has ` +
+        `provenance ${JSON.stringify(item.provenance)}. ` +
+        `Must be one of: ${Object.keys(DISCLOSURE).join(', ')}.`,
+    );
+  }
+}
+
+/**
+ * Section-level copy states only what is true of EVERY item. "Individual
+ * results may vary" holds for real cases and illustrations alike; any claim
+ * about consent or authenticity belongs on the individual card.
+ */
+const hasPatientPhotos = items.some((item) => item.provenance === 'patient');
 ---
 
 <section class="py-12">
   <h2 class="section-subheading text-center mb-2">{heading}</h2>
-  <p class="text-center text-neutral-mid mb-8 text-sm">Individual results may vary. Photos shown with patient consent.</p>
+  <p class="text-center text-neutral-mid mb-8 text-sm">
+    Individual results may vary.
+    {hasPatientPhotos && ' Patient photos are unretouched and shown with written consent.'}
+  </p>
 
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
     {items.map((item, index) => (
@@ -33,7 +103,7 @@ const {
         aria-label={`View before and after: ${item.caption || item.procedure || 'Treatment result'}`}
       >
         {item.procedure && (
-          <div class="text-xs font-semibold text-brand-blue uppercase tracking-wide mb-3">
+          <div class="text-xs font-semibold text-brand-primary uppercase tracking-wide mb-3">
             {item.procedure}
           </div>
         )}
@@ -68,6 +138,9 @@ const {
         {item.caption && (
           <p class="text-sm text-neutral-mid text-center">{item.caption}</p>
         )}
+        <p class="mt-2 text-xs text-neutral-mid/80 text-center">
+          {DISCLOSURE[item.provenance]}
+        </p>
       </div>
     ))}
   </div>
