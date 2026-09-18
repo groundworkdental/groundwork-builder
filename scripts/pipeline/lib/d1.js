@@ -41,6 +41,10 @@ function config() {
   };
 }
 
+export function d1Enabled() {
+  return enabled();
+}
+
 function enabled() {
   const c = config();
   return !!(c.accountId && c.databaseId && c.token);
@@ -53,7 +57,7 @@ function enabled() {
  * @param {Array<string|number|null>} params
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
-async function d1Query(sql, params = []) {
+export async function d1Query(sql, params = []) {
   const c = config();
   const url = `${D1_BASE}/${c.accountId}/d1/database/${c.databaseId}/query`;
 
