@@ -31,7 +31,9 @@ export const INTAKE_OVERRIDE_PATHS = [
   'practice.name',
   'practice.phone',
   'practice.email',
-  'practice.domain',   // website / booking URL
+  'practice.domain',   // website
+  'practice.bookingUrl', // the practice's own booking software — what they
+                         // tell us always beats a link the scraper guessed at
   'address.street',
   'address.city',
   'address.state',
@@ -83,6 +85,11 @@ export function mergeData(scrapeData, intakeData, preset = null) {
       flags.push(`intake override: ${path}`);
     }
   }
+
+  // Greenfield / coming-soon sites have almost no silver. Intake is then the
+  // only source for doctor, services, and concept copy — fill those gaps
+  // without overwriting anything silver already observed.
+  seedFromIntakeWhenEmpty(data, intakeData, flags);
 
   // 3) Structural normalization — the canonical shape downstream consumes.
 
@@ -153,6 +160,112 @@ export function mergeData(scrapeData, intakeData, preset = null) {
   data.meta.confidenceFlags = flags;
 
   return data;
+}
+
+/**
+ * When silver left a field empty, copy the matching intake value.
+ * Never overwrites observed silver. Used for domain-only / coming-soon sites.
+ */
+function seedFromIntakeWhenEmpty(data, intakeData, flags) {
+  const intakeDoctor = intakeData.doctor;
+  const hasDoctor = (data.doctors && data.doctors.length > 0)
+    || data.doctor?.name
+    || data.doctor?.lastName;
+  if (!hasDoctor && intakeDoctor && (intakeDoctor.lastName || intakeDoctor.firstName || intakeDoctor.name)) {
+    const firstName = intakeDoctor.firstName || null;
+    const lastName = intakeDoctor.lastName || null;
+    const name = intakeDoctor.name
+      || [firstName, lastName].filter(Boolean).join(' ')
+      || null;
+    data.doctor = {
+      ...(data.doctor || {}),
+      name,
+      firstName,
+      lastName,
+      credentials: intakeDoctor.credentials || data.doctor?.credentials || null,
+      bio: intakeDoctor.bio || null,
+      education: intakeDoctor.education || null,
+    };
+    data.doctors = [data.doctor];
+    flags.push('intake seed: doctor (silver empty)');
+  }
+
+  const silverServices = data.services?.offered || [];
+  const intakeServices = intakeData.services?.offered || [];
+  if (intakeServices.length > 0) {
+    const bySlug = new Map();
+    for (const s of silverServices) {
+      const slug = s.slug || slugify(s.name);
+      if (slug) bySlug.set(slug, s);
+    }
+    let added = 0;
+    for (const s of intakeServices) {
+      const slug = s.slug || slugify(s.name);
+      if (!slug) continue;
+      if (!bySlug.has(slug)) {
+        bySlug.set(slug, s);
+        added++;
+      }
+    }
+    if (added > 0 || silverServices.length === 0) {
+      data.services = { offered: [...bySlug.values()], hubs: data.services?.hubs || [] };
+      flags.push(`intake seed: ${added} services merged (${bySlug.size} total)`);
+    }
+  }
+
+  data.content = data.content || {};
+  const ic = intakeData.content || {};
+  if (_isEmpty(data.content.faqs) && !_isEmpty(ic.faqs)) {
+    data.content.faqs = ic.faqs;
+    flags.push('intake seed: faqs');
+  }
+  if (_isEmpty(data.content.insurance) && !_isEmpty(ic.insurance)) {
+    data.content.insurance = ic.insurance;
+    flags.push('intake seed: insurance');
+  }
+  if (_isEmpty(data.content.testimonials) && !_isEmpty(ic.testimonials)) {
+    data.content.testimonials = ic.testimonials;
+    flags.push('intake seed: testimonials');
+  }
+  if (_isEmpty(data.content.philosophy) && ic.philosophy) {
+    data.content.philosophy = ic.philosophy;
+    flags.push('intake seed: philosophy');
+  }
+  if (_isEmpty(data.practice?.description) && ic.practiceDescription) {
+    data.practice = data.practice || {};
+    data.practice.description = ic.practiceDescription;
+    flags.push('intake seed: practice.description');
+  }
+  if (_isEmpty(data.practice?.tagline) && ic.tagline) {
+    data.practice = data.practice || {};
+    data.practice.tagline = ic.tagline;
+    flags.push('intake seed: tagline');
+  }
+  if (_isEmpty(data.content.additionalContent) && !_isEmpty(ic.additionalContent)) {
+    data.content.additionalContent = ic.additionalContent;
+    flags.push('intake seed: additionalContent');
+  }
+  if (_isEmpty(data.differentiators) && !_isEmpty(intakeData.differentiators)) {
+    data.differentiators = intakeData.differentiators;
+    flags.push('intake seed: differentiators');
+  }
+  if (_isEmpty(data.content.financing) && !_isEmpty(ic.financing)) {
+    data.content.financing = ic.financing;
+    flags.push('intake seed: financing');
+  }
+  // sameAs is a union rather than a fill-when-empty: the scraper finds the
+  // Google profile, the practice tells us Facebook and Instagram, and the
+  // schema wants all of them.
+  const intakeSameAs = intakeData.practice?.sameAs || [];
+  if (!_isEmpty(intakeSameAs)) {
+    data.practice = data.practice || {};
+    const existing = Array.isArray(data.practice.sameAs) ? data.practice.sameAs : [];
+    const merged = [...new Set([...existing, ...intakeSameAs])];
+    if (merged.length > existing.length) {
+      data.practice.sameAs = merged;
+      flags.push(`intake seed: ${merged.length - existing.length} sameAs URL(s)`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
