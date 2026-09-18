@@ -19,6 +19,7 @@ const tests = [
   'test-faq-repair.js',
   'test-silver-fidelity.js',
   'test-intake-passthrough.js',
+  'test-practice-contract.js',
 ];
 
 let failed = 0;
