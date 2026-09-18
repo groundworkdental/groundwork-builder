@@ -1,0 +1,88 @@
+---
+/**
+ * Media for a service page.
+ *
+ * Exists because service pages otherwise ship as walls of text: a page
+ * describing a procedure with no image of it reads as thin to a visitor and
+ * to a search engine, and "add an image" is the step that gets skipped when
+ * nobody owns it.
+ *
+ * PROVENANCE IS REQUIRED, for the same reason it is required on BeforeAfter.
+ * Almost nothing in the asset library is a photograph of this practice, and
+ * that is fine — as long as the build never implies otherwise. The caption is
+ * always rendered, so omission is impossible rather than merely discouraged.
+ *
+ *   'practice'     a photo taken at this practice — the room, the team, their
+ *                  equipment. No caption claim beyond what is shown.
+ *   'stock'        a licensed photograph of somebody else's clinic or people.
+ *   'illustration' a render, diagram or vendor demo of a system or procedure.
+ *
+ * None of these may be captioned as a patient result. A patient case belongs
+ * in BeforeAfter, which carries the consent field.
+ *
+ * Preview builds may use imagery found on the practice's existing site before
+ * rights are confirmed — previews are noindex, and confirmation is a
+ * pre-launch gate. See docs/engineering/generator-rules.md.
+ */
+
+type Provenance = 'practice' | 'stock' | 'illustration';
+
+interface Props {
+  src: string;
+  alt: string;
+  provenance: Provenance;
+  /** Optional extra context, shown after the provenance line. */
+  caption?: string;
+  width?: number;
+  height?: number;
+  loading?: 'lazy' | 'eager';
+}
+
+const {
+  src,
+  alt,
+  provenance,
+  caption,
+  width = 1200,
+  height = 675,
+  loading = 'lazy',
+} = Astro.props;
+
+/** Visitor-facing disclosure per provenance kind. Exhaustive by construction. */
+const DISCLOSURE: Record<Provenance, string> = {
+  practice: 'Photographed at our practice.',
+  stock: 'Stock photograph — not our office or patients.',
+  illustration: 'Illustration of the technique — not a photograph of a patient.',
+};
+
+// Fail the build rather than publish an unlabeled image. An absent or
+// misspelled value would otherwise render an empty caption, which reads as a
+// claim that the image is exactly what it appears to be.
+if (!(provenance in DISCLOSURE)) {
+  throw new Error(
+    `ServiceMedia (${src}): provenance ${JSON.stringify(provenance)}. ` +
+      `Must be one of: ${Object.keys(DISCLOSURE).join(', ')}.`,
+  );
+}
+
+if (!alt?.trim()) {
+  throw new Error(`ServiceMedia (${src}): alt text is required.`);
+}
+---
+
+<figure class="my-8">
+  <img
+    src={src}
+    alt={alt}
+    width={width}
+    height={height}
+    loading={loading}
+    decoding="async"
+    class="w-full rounded-lg object-cover"
+  />
+  <figcaption class="mt-2 text-xs text-neutral-mid">
+    {/* Provenance renders on the page, never only in alt text. alt is for
+        assistive technology, not for legal cover. */}
+    {DISCLOSURE[provenance]}{caption ? ` ${caption}` : ''}
+  </figcaption>
+</figure>

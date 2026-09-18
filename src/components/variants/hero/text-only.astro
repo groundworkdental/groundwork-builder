@@ -35,7 +35,7 @@ const phone = content.phone || site.phone;
     </h1>
 
     <!-- Subheadline -->
-    <p class="text-white/70 text-lg md:text-xl max-w-xl leading-relaxed mb-10">
+    <p class="text-white/90 text-lg md:text-xl max-w-xl leading-relaxed mb-10">
       {content.subheadline}
     </p>
 
@@ -63,8 +63,8 @@ const phone = content.phone || site.phone;
     <!-- Phone -->
     {phone && (
       <a
-        href={`tel:${phone}`}
-        class="inline-flex items-center gap-2 font-serif text-2xl text-white/60 mt-8 hover:text-white/80 transition-colors tabular-nums"
+        href={`tel:${phone.replace(/\D/g, '')}`}
+        class="inline-flex items-center gap-2 font-serif text-2xl text-white/90 mt-8 hover:text-white/80 transition-colors tabular-nums"
         aria-label={`Call us at ${phone}`}
       >
         <svg class="w-6 h-6 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">

@@ -63,7 +63,7 @@ const siteName = site.name ?? '';
       <!-- Phone -->
       {phone && (
         <a
-          href={`tel:${phone}`}
+          href={`tel:${phone.replace(/\D/g, '')}`}
           class="inline-flex items-center gap-2 text-neutral-mid hover:text-brand-primary transition-colors font-sans text-base tabular-nums underline underline-offset-2"
           aria-label={`Call us at ${phone}`}
         >

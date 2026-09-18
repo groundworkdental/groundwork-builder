@@ -44,7 +44,7 @@ const phone = content.phone || site.phone;
       </a>
       {phone && (
         <a
-          href={`tel:${phone}`}
+          href={`tel:${phone.replace(/\D/g, '')}`}
           class="inline-flex items-center gap-2 text-neutral-dark hover:text-brand-primary transition-colors font-semibold text-base tabular-nums"
           aria-label={`Call us at ${phone}`}
         >

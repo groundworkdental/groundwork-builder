@@ -39,7 +39,7 @@ const phone = content.phone || site.phone;
       <!-- Button 2: Call us — phone number as label -->
       {phone && (
         <a
-          href={`tel:${phone}`}
+          href={`tel:${phone.replace(/\D/g, '')}`}
           class={`inline-flex items-center justify-center gap-2 px-6 py-3 ${t.radiusClass} font-semibold text-sm border-2 border-neutral-dark/20 text-neutral-dark hover:border-brand-primary hover:text-brand-primary transition-all duration-200 tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2`}
           aria-label={`Call us at ${phone}`}
         >
