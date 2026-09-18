@@ -175,7 +175,8 @@ export function renderSalesAudit(data, opts = {}) {
   const issueCount = summaryFindings.length;
   const siteUrl = meta.source_url || `https://${meta.url}`;
   const formattedDate = formatDisplayDate(meta.generated_at);
-  const leadApiUrl = opts.leadApiUrl || 'https://groundworkdental.com/api/audit-preview-request';
+  // Same origin as the reports site's Pages Function — relative, no CORS.
+  const leadApiUrl = opts.leadApiUrl || '/api/audit-preview-request';
   const slug = meta.slug || '';
   const vendor = data.vendor || {};
   const tco = vendor.subscription_tco;

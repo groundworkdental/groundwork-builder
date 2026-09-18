@@ -1887,8 +1887,9 @@ export async function generateAuditReports(outputDir, {
   const baseName = outputFilename || (diff ? 'audit-report-after' : 'audit-report');
   const isAfterOnly = baseName === 'audit-report-after';
 
-  const domain = process.env.GROUNDWORK_SUBDOMAIN || 'groundworkdental.com';
-  const resolvedLeadApiUrl = leadApiUrl || `https://${domain}/api/audit-preview-request`;
+  // Audit pages are served from the same origin as the lead-capture Pages
+  // Function (the groundwork-reports project) — relative URL, no CORS.
+  const resolvedLeadApiUrl = leadApiUrl || '/api/audit-preview-request';
 
   const writes = [];
   let resolvedAuditData = auditData;
