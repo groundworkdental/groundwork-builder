@@ -31,7 +31,7 @@
  *   AIRTABLE_AUDITS_TABLE       — Audits table name
  *   AIRTABLE_BUILDS_TABLE       — Builds table name
  *   GROUNDWORK_SUBDOMAIN        — base subdomain (default: groundworkdental.com)
- *   GITHUB_REPO_OWNER        — GitHub repo owner (default: gwgunther)
+ *   GITHUB_REPO_OWNER        — GitHub repo owner (default: groundworkdental)
  *   GITHUB_REPO_NAME         — GitHub repo name (default: groundwork-builder)
  */
 
@@ -544,7 +544,7 @@ function gitCommitPush(repoPath, message, paths = []) {
 async function ensureCfPagesProject({ slug, baseDomain }) {
   const token     = process.env.CLOUDFLARE_API_TOKEN;
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const repoOwner = process.env.GITHUB_REPO_OWNER || 'gwgunther';
+  const repoOwner = process.env.GITHUB_REPO_OWNER || 'groundworkdental';
   const repoName  = process.env.GITHUB_REPO_NAME  || 'groundwork-builder';
 
   if (!token || !accountId) {
@@ -741,7 +741,7 @@ async function recordBuildRun({ slug, practiceUrl, resolvedPreviewUrl, pitchUrl,
   } catch { /* non-fatal */ }
 
   // GitHub folder URL — derive from env so it's a clickable link in Airtable
-  const repoOwner = process.env.GITHUB_REPO_OWNER || 'gwgunther';
+  const repoOwner = process.env.GITHUB_REPO_OWNER || 'groundworkdental';
   const repoName  = process.env.GITHUB_REPO_NAME  || 'groundwork-builder';
   const githubFolderUrl = `https://github.com/${repoOwner}/${repoName}/tree/main/clients/${slug}`;
 
