@@ -5,11 +5,16 @@
  *
  * Rule: if bronze has a /blog/[slug] page with ≥200 chars of body content,
  *       use it. Only fall back to stubs for services with no real content.
+ *
+ * Real posts are ported verbatim by lib/blog-migrate.js — deterministic, free,
+ * and slug-preserving so old URLs redirect to themselves. Only the keyword
+ * stubs in Phase B are generated.
  */
 
 import { writeFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { rewriteBlogPost } from './ai-blog-rewrite.js';
+import { migratePost, isPostPath } from './blog-migrate.js';
+import { isBlogPath } from './crawl-select.js';
 
 /**
  * Generate blog posts — from real bronze content or keyword stubs.
@@ -39,7 +44,13 @@ export async function generateBlogStubs(data, outputDir, preset = null) {
   const candidatePosts = bronzePages
     .filter(p => {
       const path = p.path || p.url || '';
-      return /^\/blog\//i.test(path) || /^\/articles?\//i.test(path) || /^\/news\//i.test(path);
+      // `isBlogPath` is the classifier the crawl and every silver pass already
+      // agree on, so using it here keeps one definition of "this is blog". The
+      // previous `/^\/blog\//` prefix test disagreed with it: cutesmiles4kids
+      // publishes at /2021/08/31/<slug>, so all 28 of its posts were held back
+      // from extraction as blog and then not ported either — dropped by both
+      // halves of the pipeline. isPostPath still removes indexes and archives.
+      return isBlogPath(path) && isPostPath(path);
     })
     .filter(p => {
       const body = p.bodyText || p.body || (p.paragraphs || []).join('\n') || '';
@@ -87,83 +98,52 @@ export async function generateBlogStubs(data, outputDir, preset = null) {
     const existing = byTitle.get(key);
     if (!existing || bodyLen(p) > bodyLen(existing)) byTitle.set(key, p);
   }
-  const realPosts = [...byTitle.values()].slice(0, 6); // cap at 6 real posts
+  // No cap: every real post the crawl found gets migrated. These are the
+  // practice's own published articles and their indexed URLs — dropping them
+  // was the single largest content loss in the rebuild.
+  const realPosts = [...byTitle.values()];
 
+  const migratedSlugs = new Set();
+  const migratedPaths = new Set();
+  const writtenFiles = [];
   let realCount = 0;
-  let draftCount = 0;
+  let skippedThin = 0;
   if (realPosts.length > 0) {
     const today = new Date().toISOString().split('T')[0];
     const practiceName = data.practice.name || '';
-    const practiceCtx = {
-      name: practiceName,
-      doctor: data.doctor?.name || '',
-      city: data.address?.city || '',
-    };
 
-    // Run all rewrites in parallel — Claude per-post takes 10–40s, so serial
-    // would dominate runtime for sites with several real posts.
-    const rewrites = await Promise.allSettled(
-      realPosts.map(page => rewriteBlogPost(page, practiceCtx))
-    );
-
-    for (let i = 0; i < realPosts.length; i++) {
-      const page = realPosts[i];
-      const result = rewrites[i];
-
-      const path  = page.path || page.url || '';
-      const slug  = path.replace(/^\/(?:blog|articles?|news)\//, '').replace(/\/$/, '').replace(/[^a-z0-9-]/gi, '-').toLowerCase() || 'post';
-      const title = page.h1 || page.title || slug.replace(/-/g, ' ');
-
-      // Best-guess category from slug/title
-      const categoryGuess = /implant/i.test(slug + title) ? 'implants'
-        : /cosmetic|whiten|veneer|invisalign/i.test(slug + title) ? 'cosmetic'
-        : /crown|bridge|filling|restor/i.test(slug + title) ? 'restorative'
-        : /gum|perio|hygiene|clean/i.test(slug + title) ? 'oral-health'
-        : 'general-dentistry';
-
-      const aiOk = result.status === 'fulfilled' && result.value?.ok;
-      let body, description, draft;
-
-      if (aiOk) {
-        body = result.value.markdown;
-        description = (result.value.summary || '').slice(0, 157);
-        draft = false;
-        realCount++;
-      } else {
-        // AI rewrite failed — never ship raw bodyText (full of nav chrome).
-        // Mark the post draft (hidden from index/sitemap) so it doesn't go live
-        // looking broken. The raw scrape is preserved as a placeholder for
-        // a human to revisit.
-        const rawBody = (page.bodyText || page.body || '').slice(0, 2000).trimEnd();
-        body = rawBody
-          ? `> Draft — AI rewrite did not run for this post. The raw scraped text is preserved below for editing.\n\n${rawBody}`
-          : '> Draft — original article body could not be extracted.';
-        description = title;
-        draft = true;
-        draftCount++;
-        const reason = result.status === 'rejected'
-          ? result.reason?.message || String(result.reason)
-          : result.value?.error || 'unknown';
-        console.warn(`  [blog-rewrite] Marked ${slug} as draft — ${reason}`);
-      }
+    for (const page of realPosts) {
+      // Deterministic port from bronze contentBlocks — no model, no cost, and
+      // no truncated-draft failure mode.
+      const post = migratePost(page);
+      if (!post) { skippedThin++; continue; }
 
       const mdContent = `---
-title: ${JSON.stringify(title)}
-description: ${JSON.stringify(description || title)}
-publishDate: ${today}
-targetKeyword: ${JSON.stringify(slug.replace(/-/g, ' '))}
-category: ${JSON.stringify(categoryGuess)}
+title: ${JSON.stringify(post.title)}
+description: ${JSON.stringify(post.description || post.title)}
+publishDate: ${post.publishDate || today}
+targetKeyword: ${JSON.stringify(post.slug.replace(/-/g, ' '))}
+category: ${JSON.stringify(post.category)}
 author: ${JSON.stringify(practiceName)}
-draft: ${draft}
+draft: false
+migrated: true
+sourcePath: ${JSON.stringify(post.sourcePath)}
 ---
 
-${body}
+${post.markdown}
 `;
-      await writeFile(resolve(blogDir, `${slug}.md`), mdContent, 'utf8');
+      const outFile = resolve(blogDir, `${post.slug}.md`);
+      await writeFile(outFile, mdContent, 'utf8');
+      writtenFiles.push(outFile);
+      migratedSlugs.add(post.slug);
+      // Original path — the redirect writer drops these so a migrated post
+      // isn't shadowed by a 301 pointing somewhere else.
+      migratedPaths.add(post.sourcePath || `/blog/${post.slug}`);
+      realCount++;
     }
 
-    if (realCount > 0) console.log(`  Used ${realCount} real blog post(s) from original site (AI-rewritten).`);
-    if (draftCount > 0) console.log(`  Marked ${draftCount} post(s) as draft (AI rewrite failed; needs manual review).`);
+    if (realCount > 0) console.log(`  Migrated ${realCount} blog post(s) verbatim from the original site (no AI).`);
+    if (skippedThin > 0) console.log(`  Skipped ${skippedThin} blog page(s) with too little body to port.`);
   }
 
   // ------------------------------------------------------------------
@@ -209,14 +189,19 @@ ${body}
     }
   }
 
-  // Deduplicate by slug; reduce stub cap if real posts already written
-  const stubCap = Math.max(0, 8 - realCount);
-  const unique = [...new Map(articles.map((a) => [a.slug, a])).values()].slice(0, stubCap);
+  // Stubs are the only *generated* content here, so they only fill a genuine
+  // void: a practice that already publishes gets its own archive and nothing
+  // invented alongside it. Padding a real 3-post blog to 8 with keyword
+  // templates is the force-fill this pipeline is meant to avoid.
+  const stubCap = realCount > 0 ? 0 : 8;
+  const unique = [...new Map(articles.map((a) => [a.slug, a])).values()]
+    .filter((a) => !migratedSlugs.has(a.slug))
+    .slice(0, stubCap);
 
   if (unique.length === 0) {
-    if (realCount > 0) console.log('  No stub articles needed — real posts cover the blog.');
+    if (realCount > 0) console.log(`  Skipping stub articles — ${realCount} real post(s) migrated.`);
     else console.log('  No matching article rules — skipping blog stub generation.');
-    return realCount;
+    return { count: realCount, migratedPaths: [...migratedPaths], writtenFiles };
   }
 
   const practiceName = data.practice.name || 'Our Practice';
@@ -294,6 +279,6 @@ Ready to learn more? [Schedule a consultation](/schedule) or call us at ${phone}
   }
 
   console.log(`  Generated ${unique.length} blog stub(s) (${realCount} real + ${unique.length} stub = ${realCount + unique.length} total).`);
-  return realCount + unique.length;
+  return { count: realCount + unique.length, migratedPaths: [...migratedPaths], writtenFiles };
 }
 
