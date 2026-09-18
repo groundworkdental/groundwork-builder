@@ -22,7 +22,7 @@ export async function run({ dna, practice, files = {}, screenshots = [], referen
 
   // Polish gets all screenshots — it needs to catch edge cases across viewports
   const imageBlocks = screenshots.slice(0, 6).flatMap(s => [
-    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: s.base64 } },
+    { type: 'image', source: { type: 'base64', media_type: s.mediaType || 'image/png', data: s.base64 } },
     { type: 'text', text: `Screenshot: ${s.route} @ ${s.viewport?.w}×${s.viewport?.h}` },
   ]);
 

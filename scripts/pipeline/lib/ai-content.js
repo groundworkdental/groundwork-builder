@@ -80,6 +80,7 @@ export async function runContentWrite(scraped, merged, audit, preset, opts = {},
     const { callAnthropic } = await import('./ai-call.js');
     const result = await callAnthropic({
       phase:     'content',
+      cache:     true,
       model:     'claude-sonnet-4-6',
       // Output is now substantially richer (additionalContent grounding,
       // differentiators woven, contentAudit entry per section, full service
@@ -123,14 +124,21 @@ export async function runContentWrite(scraped, merged, audit, preset, opts = {},
  */
 export const runContentMapping = runContentWrite;
 
-async function buildPrompt(scraped, merged, audit, preset, blueprint) {
+/**
+ * Exported for testing. The grounding blocks this assembles are the difference
+ * between copy written from the practice's own words and copy invented wholesale,
+ * and two of them were silently empty on every run — so the assembled prompt
+ * needs to be inspectable without an API call.
+ */
+export async function buildPrompt(scraped, merged, audit, preset, blueprint) {
   const practice = merged.practice || {};
   const doctor = merged.doctor || {};
   const services = merged.services || {};
   const content = merged.content || {};
 
   // Page inventory — condensed for prompt efficiency
-  const pageInventory = buildPageInventorySummary(scraped.pageInventory || []);
+  // Built after servicePageContent so it can skip pages already sent in full.
+  let pageInventory;
 
   const verticalName = preset?.schema?.verticalName || 'Healthcare';
 
@@ -142,23 +150,40 @@ async function buildPrompt(scraped, merged, audit, preset, blueprint) {
   const serviceSlugsForContent = offeredServices.map(s => s.slug).filter(Boolean).join(', ');
 
   // Per-service scraped page content — feed the AI the actual text from each service page
-  const servicePageContent = buildServicePageContent(offeredServices, scraped.pageInventory || []);
+  const servicePages = buildServicePageContent(offeredServices, scraped.pageInventory || []);
+  const servicePageContent = servicePages.text;
 
   // Silver three-tier inputs ───────────────────────────────────────────────
+  // Both tiers are written top-level by silver but land under `content` on the
+  // merged object, so check both — same fallback coverage-audit.js and
+  // page-generator.js already use. Reading only the top level silently starved
+  // these blocks on every real run.
   // additionalContent: verbatim prose rescue, tagged by source page
-  const additionalContentBlock = buildAdditionalContentBlock(merged.additionalContent || []);
+  const additionalContentBlock = buildAdditionalContentBlock(
+    merged.additionalContent || merged.content?.additionalContent || []
+  );
   // differentiators: short why-us labels, tagged by source page
-  const differentiatorsBlock = buildDifferentiatorsBlock(merged.differentiators || []);
+  const differentiatorsBlock = buildDifferentiatorsBlock(
+    merged.differentiators || merged.content?.differentiators || []
+  );
 
   // Testimonials
   const testimonials = (content.testimonials || []).length > 0
     ? content.testimonials.map(t => `"${t.text}"${t.author ? ` — ${t.author}` : ''}`).join('\n')
     : 'None found on current site.';
 
-  // Existing FAQs
-  const existingFAQs = (content.faqs || []).length > 0
-    ? content.faqs.map(f => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n')
+  // Existing FAQs. When the practice has its own, they are injected verbatim
+  // downstream (page-generator.injectFaqs) and Write's versions were only ever
+  // used for a homepage teaser — so writing them costs prompt and output tokens
+  // for copy that competes with the real thing. Stand down instead.
+  const scrapedFAQs = content.faqs || [];
+  const hasOwnFAQs  = scrapedFAQs.length > 0;
+  const existingFAQs = hasOwnFAQs
+    ? scrapedFAQs.map(f => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n')
     : 'None found on current site.';
+  const faqInstruction = hasOwnFAQs
+    ? `This practice already has ${scrapedFAQs.length} FAQ(s) on its site, shown above. They are carried over verbatim by a later step. **Return \`"faqs": []\`** — do not rewrite, re-order, or supplement them.`
+    : 'This practice has no FAQs. You may write 3-5, but ONLY questions answerable from facts already on the site (hours, location, services offered, insurance accepted). Return `"faqs": []` if nothing is answerable. Never invent answers about pricing, policy, or clinical outcomes.';
 
   // Stats
   const stats = content.stats || {};
@@ -184,6 +209,10 @@ async function buildPrompt(scraped, merged, audit, preset, blueprint) {
   // the brand step tells it how COLORS should feel.
   const toneGuidance = buildToneGuidance(audit?.tone?.recommended);
 
+  pageInventory = buildPageInventorySummary(scraped.pageInventory || [], {
+    excludePaths: servicePages.usedPaths,
+  });
+
   return renderSkillPrompt('content/content-write', {
     verticalName,
     practiceName:        practice.name      || '[Practice Name]',
@@ -204,6 +233,7 @@ async function buildPrompt(scraped, merged, audit, preset, blueprint) {
     pageInventory,
     testimonials,
     existingFAQs,
+    faqInstruction,
     stats:               statsStr,
   });
 }
@@ -286,7 +316,14 @@ Copy should feel understated, considered — the practice doesn't need to overse
 - CTAs are quiet and specific: "Reserve your consultation", "Begin your treatment", "Speak with the practice".`,
   };
 
-  return GUIDANCE[bucket];
+  const SHARED = `## Voice floor (always)
+
+Write like a clear, helpful person. State facts. Do not sell the idea that you are being honest or different.
+No character-thesis copy ("we look closely", "a plan you can see", "not a slogan", "so you can say yes"). If it is true, say the thing. Do not narrate that you told the truth.
+
+`;
+
+  return SHARED + GUIDANCE[bucket];
 }
 
 /**
@@ -353,49 +390,111 @@ function buildDifferentiatorsBlock(items) {
 
 /**
  * Match each service to its scraped page content so the AI uses real source material.
- * Matches on /services/{slug} or /services/{name-variant} paths.
+ *
+ * Silver records the page each service was derived from on `svc.source`, which is
+ * authoritative and works for legacy flat-URL sites (`/dental-implants.html`) as
+ * well as `/services/<slug>` structures. Path-shape matching is kept as a fallback
+ * for services with no recorded source. Matching only on `/services/<slug>`
+ * silently returned zero matches on every flat-URL site.
+ *
+ * One hub page routinely backs several services (a children's dentistry page can
+ * produce six), so pages are emitted once with the slugs they feed rather than
+ * repeated per service — same grounding, a fraction of the prompt.
  */
 function buildServicePageContent(services, inventory) {
-  if (!services.length || !inventory.length) return 'No service page content available.';
+  if (!services.length || !inventory.length) return { text: 'No service page content available.', usedPaths: new Set() };
+
+  const norm = p => String(p || '').toLowerCase().replace(/\/+$/, '');
+  const byPath = new Map();
+  for (const p of inventory) byPath.set(norm(p.path || p.url), p);
+
+  const findPage = (svc) => {
+    if (svc.source) {
+      const hit = byPath.get(norm(svc.source));
+      if (hit) return hit;
+    }
+    const nameSlug = svc.name?.toLowerCase().replace(/\s+/g, '-');
+    for (const [path, page] of byPath) {
+      if (path === `/services/${svc.slug}` || path.includes(`/services/${svc.slug}`)) return page;
+      if (nameSlug && path.includes(`/services/${nameSlug}`)) return page;
+      if (svc.slug && (path === `/${svc.slug}` || path === `/${svc.slug}.html`)) return page;
+    }
+    return null;
+  };
+
+  // Group by source page — one page can back many services.
+  const groups = new Map();
+  const unmatched = [];
+  for (const svc of services) {
+    const page = findPage(svc);
+    if (!page) { unmatched.push(svc.slug); continue; }
+    const key = norm(page.path || page.url);
+    if (!groups.has(key)) groups.set(key, { page, slugs: [] });
+    groups.get(key).slugs.push(svc.slug);
+  }
+
+  if (groups.size === 0) return { text: 'No matching service pages found in crawl.', usedPaths: new Set() };
 
   const blocks = [];
-  for (const svc of services) {
-    // Find the matching page — try exact slug match, then name-based path match
-    const page = inventory.find(p => {
-      const path = (p.path || p.url || '').toLowerCase().replace(/\/+$/, '');
-      return path === `/services/${svc.slug}` ||
-             path.includes(`/services/${svc.slug}`) ||
-             path.includes(`/services/${svc.name?.toLowerCase().replace(/\s+/g, '-')}`);
-    });
-
-    if (!page) continue;
-
-    const lines = [`### ${svc.slug} (${svc.name})`];
+  for (const { page, slugs } of groups.values()) {
+    const lines = [`### ${page.path || page.url} — source for: ${slugs.join(', ')}`];
     if (page.h1) lines.push(`H1: ${page.h1}`);
     if (page.metaDesc) lines.push(`Meta: ${page.metaDesc}`);
-    if (page.paragraphs?.length) {
+    if (page.narrative) {
+      lines.push(page.narrative.slice(0, 2000));
+    } else if (page.paragraphs?.length) {
       page.paragraphs.slice(0, 4).forEach(p => lines.push(`  ${p.slice(0, 300)}`));
     }
     blocks.push(lines.join('\n'));
   }
 
-  return blocks.length > 0 ? blocks.join('\n\n') : 'No matching service pages found in crawl.';
+  // Naming the sourceless services matters as much as supplying the sourced ones:
+  // it's what keeps `create` from turning into invention.
+  if (unmatched.length) {
+    blocks.push(
+      `### No source page on the original site for: ${unmatched.join(', ')}\n` +
+      `These services have no existing copy. Check additionalContent for relevant prose; ` +
+      `if nothing covers them, return intro: null. Do NOT write generic copy to fill the gap.`
+    );
+  }
+
+  return { text: blocks.join('\n\n'), usedPaths: new Set(groups.keys()) };
 }
 
-function buildPageInventorySummary(inventory) {
+/**
+ * Pages already supplied in full by `servicePageContent` — repeating their
+ * narrative here doubled the prompt for no added grounding.
+ */
+function buildPageInventorySummary(inventory, { excludePaths = new Set(), cap = 20 } = {}) {
   if (!inventory || inventory.length === 0) return 'No pages crawled.';
 
-  return inventory.map(page => {
+  const norm = p => String(p || '').toLowerCase().replace(/\/+$/, '') || '/';
+  const remaining = inventory.filter(p => !excludePaths.has(norm(p.path || p.url)));
+
+  // Keep the meatiest pages when over cap — a 90-word stub adds nothing that
+  // its title doesn't already say, and prompt size is what kills this call.
+  const kept = remaining.length > cap
+    ? [...remaining].sort((a, b) => (b.wordCount || 0) - (a.wordCount || 0)).slice(0, cap)
+    : remaining;
+
+  const omitted = remaining.length - kept.length;
+  const summary = kept.map(page => {
     const lines = [`### ${page.path || page.url}`];
     if (page.title) lines.push(`Title: ${page.title}`);
     if (page.h1) lines.push(`H1: ${page.h1}`);
-    if (page.h2s?.length) lines.push(`H2s: ${page.h2s.join(' | ')}`);
     if (page.metaDesc) lines.push(`Meta: ${page.metaDesc}`);
-    if (page.paragraphs?.length) {
+    if (page.narrative) {
+      lines.push('Content (narrative):');
+      lines.push(page.narrative.slice(0, 2000));
+    } else if (page.paragraphs?.length) {
       lines.push(`Content excerpts:`);
       page.paragraphs.slice(0, 3).forEach(p => lines.push(`  • ${p.slice(0, 200)}`));
     }
     lines.push(`Word count: ~${page.wordCount}`);
     return lines.join('\n');
   }).join('\n\n');
+
+  return omitted > 0
+    ? `${summary}\n\n(${omitted} further page(s) omitted — lower word count, and their services are already covered above.)`
+    : summary;
 }

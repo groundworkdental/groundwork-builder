@@ -127,12 +127,40 @@ export function clampVariantMap(variants = {}) {
 }
 
 /**
+ * OpenSSL codes that mean "this chain cannot be built from our trust store",
+ * not "this site is broken". A server that omits its intermediate certificate
+ * is served fine by every browser and by curl — both fall back to the system
+ * store or fetch the missing link via AIA — while Node's stricter verification
+ * refuses outright. butterflybraces.com and changorthodontics.com both return
+ * 200 to curl and fail here, and both were being written off as dead sites.
+ */
+const TLS_CHAIN_CODES = new Set([
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+]);
+
+/** Node buries the real code in error.cause, sometimes more than one deep. */
+function causeCodes(error, depth = 4) {
+  const codes = [];
+  let cur = error;
+  while (cur && depth-- > 0) {
+    if (cur.code) codes.push(String(cur.code));
+    cur = cur.cause;
+  }
+  return codes;
+}
+
+/**
  * Classify homepage HTML / status into a scrape outcome.
- * @returns {'ok'|'empty'|'bot_wall'|'redirect_loop'|'http_error'|'timeout'}
+ * @returns {'ok'|'empty'|'bot_wall'|'redirect_loop'|'http_error'|'timeout'|'tls_chain_incomplete'}
  */
 export function classifyHomepage({ status, html, finalUrl, error } = {}) {
   if (error) {
     const msg = String(error.message || error);
+    // Check codes before the message: a TLS failure surfaces as the useless
+    // message "fetch failed", so matching on text alone lands in http_error.
+    if (causeCodes(error).some((c) => TLS_CHAIN_CODES.has(c))) return 'tls_chain_incomplete';
     if (/abort|timeout/i.test(msg)) return 'timeout';
     if (/redirect count exceeded/i.test(msg)) return 'redirect_loop';
     return 'http_error';
@@ -170,4 +198,16 @@ export function classifyHomepage({ status, html, finalUrl, error } = {}) {
 
 export function isScrapeFailure(kind) {
   return kind && kind !== 'ok';
+}
+
+/**
+ * True when the crawl failed on OUR trust configuration, not on the site.
+ *
+ * Callers use this to decide whether the practice's sourcing status should be
+ * written off. It must not be folded into `isScrapeFailure` — the crawl really
+ * did fail and there is no bronze to build from; the point is only that the
+ * prospect is alive and should stay in the pipeline.
+ */
+export function isTlsTrustFailure(kind) {
+  return kind === 'tls_chain_incomplete';
 }

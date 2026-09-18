@@ -13,6 +13,23 @@ import {
 } from './audit-data-copy.js';
 import { previewLlmsTxt } from './generate-llms-txt.js';
 import { buildFindingEvidenceRows } from './finding-evidence.js';
+import { readFileSync, existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const PIPELINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+function readClientLlmsTxt(slug) {
+  if (!slug) return null;
+  const p = join(PIPELINE_ROOT, 'clients', slug, 'public', 'llms.txt');
+  if (!existsSync(p)) return null;
+  try {
+    const text = readFileSync(p, 'utf8').trim();
+    return text || null;
+  } catch {
+    return null;
+  }
+}
 
 const SCHEMA = 'groundwork-audit/v1';
 const MAX_SUMMARY = 5;
@@ -41,6 +58,7 @@ export function assembleAuditData(opts) {
     vendor = null,
     agenticBrowsing = null,
     citability = null,
+    recommendedLlmsTxt: recommendedLlmsTxtOpt = null,
   } = opts;
 
   const practiceName = scraped?.practice?.name || hostnameLabel(url);
@@ -53,7 +71,9 @@ export function assembleAuditData(opts) {
   );
   const summaryIds = pickSummaryIds(issueFindings, pagespeed);
 
-  const recommendedLlmsTxt = buildRecommendedLlmsPreview(scraped, url);
+  const recommendedLlmsTxt = recommendedLlmsTxtOpt
+    || readClientLlmsTxt(slug)
+    || buildRecommendedLlmsPreview(scraped, url);
 
   const assembledFindings = findings.map(f =>
     transformFinding(f, {

@@ -3,18 +3,26 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import CTABlock from '../../components/CTABlock.astro';
 import { site, doctor, address, localBusinessSchema } from '../../config/site';
 
-// TODO: Add cities near the practice
-// Each city generates a location page for local SEO
-const nearbyLocations = [
-  { city: 'Sample City', slug: 'sample-city', distance: '5 miles' },
-  // { city: 'Another City', slug: 'another-city', distance: '10 miles' },
-];
-
+// Location pages are opt-in and must be backed by real content.
+//
+// This previously shipped a hardcoded "Sample City" page, so every rebuilt site
+// went live with a placeholder location page — while practices that had genuine
+// neighborhood pages lost them. An empty list generates no routes at all, which
+// is the correct default: a location page with nothing but a templated sentence
+// is a doorway page, and the practice's own local pages should be ported rather
+// than regenerated.
+//
+// To enable: add entries here with real, practice-specific copy.
+//
+// The list lives inside getStaticPaths because Astro hoists that function into
+// its own chunk at build time — it cannot close over module-scope bindings.
 export function getStaticPaths() {
-  return [
-    { params: { city: 'sample-city' }, props: { cityName: 'Sample City', distance: '5 miles' } },
-    // TODO: Add more cities
-  ];
+  const nearbyLocations: Array<{ city: string; slug: string; distance: string }> = [];
+
+  return nearbyLocations.map(({ city, slug, distance }) => ({
+    params: { city: slug },
+    props: { cityName: city, distance },
+  }));
 }
 
 const { cityName, distance } = Astro.props;

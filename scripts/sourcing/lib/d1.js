@@ -237,3 +237,27 @@ export async function findSourcedByPlaceId(placeId) {
 export async function setSourcedStatus(placeId, status) {
   await d1Query('UPDATE sourced_practices SET status = ? WHERE place_id = ?', [status, placeId]);
 }
+
+/**
+ * Mark scrape failure by website URL (eval / builder path).
+ * Matches website_url OR final_url; best-effort (0 rows OK).
+ */
+export async function setSourcedUnableToScrape(websiteUrl, detail = {}) {
+  if (!websiteUrl) return { updated: 0 };
+  const status = 'unable_to_scrape';
+  let hostname = '';
+  try { hostname = new URL(websiteUrl).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
+  const norm = String(websiteUrl).replace(/\/+$/, '');
+  const result = await d1Query(
+    `UPDATE sourced_practices
+     SET status = ?
+     WHERE lower(rtrim(website_url, '/')) = lower(?)
+        OR lower(rtrim(final_url, '/')) = lower(?)
+        OR (length(?) > 0 AND (
+             lower(website_url) LIKE '%' || lower(?) || '%'
+          OR lower(final_url) LIKE '%' || lower(?) || '%'
+        ))`,
+    [status, norm, norm, hostname, hostname, hostname],
+  );
+  return { updated: result?.meta?.changes ?? 0, status, detail };
+}

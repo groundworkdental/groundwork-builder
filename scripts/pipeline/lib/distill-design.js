@@ -13,7 +13,7 @@
  *   node scripts/pipeline/distill-cli.js --url https://x.com --slug x --tag inspo
  */
 
-import { readFile, writeFile, mkdir, readdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir, stat, open, unlink } from 'node:fs/promises';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
@@ -273,19 +273,43 @@ async function readIndex() {
 }
 
 async function updateIndex(fp) {
-  const idx = await readIndex();
-  const entry = {
-    slug:       fp.slug,
-    tag:        fp.tag,
-    source:     fp.source,
-    captured:   fp.captured,
-    archetype:  fp.layout?.archetype || null,
-    mood:       fp.palette?.mood || null,
-    fontPair:   fp.fontPair || null,
-    adjectives: fp.adjectives || [],
-  };
-  const existingIdx = idx.entries.findIndex(e => e.slug === fp.slug);
-  if (existingIdx >= 0) idx.entries[existingIdx] = entry;
-  else idx.entries.push(entry);
-  await writeFile(INDEX_FILE, JSON.stringify(idx, null, 2));
+  await mkdir(LIBRARY_DIR, { recursive: true });
+  const lockPath = `${INDEX_FILE}.lock`;
+  const started = Date.now();
+  // Simple exclusive lock so parallel builds don't clobber index.json (RMW race).
+  while (true) {
+    try {
+      const fh = await open(lockPath, 'wx');
+      await fh.writeFile(String(process.pid));
+      await fh.close();
+      break;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      if (Date.now() - started > 15_000) {
+        // Stale lock — steal
+        try { await unlink(lockPath); } catch { /* ignore */ }
+        continue;
+      }
+      await new Promise((r) => setTimeout(r, 50 + Math.random() * 100));
+    }
+  }
+  try {
+    const idx = await readIndex();
+    const entry = {
+      slug:       fp.slug,
+      tag:        fp.tag,
+      source:     fp.source,
+      captured:   fp.captured,
+      archetype:  fp.layout?.archetype || null,
+      mood:       fp.palette?.mood || null,
+      fontPair:   fp.fontPair || null,
+      adjectives: fp.adjectives || [],
+    };
+    const existingIdx = idx.entries.findIndex(e => e.slug === fp.slug);
+    if (existingIdx >= 0) idx.entries[existingIdx] = entry;
+    else idx.entries.push(entry);
+    await writeFile(INDEX_FILE, JSON.stringify(idx, null, 2));
+  } finally {
+    try { await unlink(lockPath); } catch { /* ignore */ }
+  }
 }

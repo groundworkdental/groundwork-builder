@@ -33,7 +33,7 @@ export async function run({ dna, practice, screenshots = [], files = {}, referen
   // Build image content blocks — cap at 6 screenshots to stay within token budget
   const shots = screenshots.slice(0, 6);
   const imageBlocks = shots.flatMap(s => [
-    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: s.base64 } },
+    { type: 'image', source: { type: 'base64', media_type: s.mediaType || 'image/png', data: s.base64 } },
     { type: 'text',  text: `Screenshot: ${s.route} @ ${s.viewport?.w}×${s.viewport?.h}` },
   ]);
 

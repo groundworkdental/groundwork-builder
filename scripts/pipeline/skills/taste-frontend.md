@@ -5,7 +5,9 @@
 > and adapts the stack-specific guidance to Groundwork Builder's reality:
 > **Astro 6 (static) + Tailwind 4 + Georgia/Figtree, no Framer Motion, no React, no shadcn/ui.**
 >
-> Read this AFTER the project-specific `design.md` skill. Where the two conflict, project rules win.
+> **Wiring:** Human + section-craft reference. **Not** injected into brand-dna (identity uses thin
+> `skills/design.md` + `design-principles-core` §A). Section generate/critique use Impeccable refs;
+> fold durable anti-slop into principles-core / `anti-slop.js` when promoting a rule.
 
 ## 1. Baseline configuration dials
 
@@ -214,10 +216,14 @@ Before considering a section complete, every Astro component must pass:
 
 ## 9. How this skill fits into the pipeline
 
-The Creative Director (Phase 3) sets the dials per practice based on brand signals + AI audit positioning. The dials then propagate to:
+| Concern | Where it actually lands |
+|---------|-------------------------|
+| Practice color identity | `skills/design.md` → brand-dna (not this file) |
+| Universal bans / floor | `design-principles-core.md` + `lib/audit/anti-slop.js` |
+| Template look (variants, type bucket, atoms) | catalog `docs/design-catalog/runs/<id>/entry.json` |
+| Section Astro craft | Impeccable refs via `lib/impeccable.js` in `skill-generate` / `skill-critique` |
+| Fonts | `lib/brand/font-pairings.js` (+ catalog type bucket) |
 
-- **`design-dna.ts`** — the variant + token selection (radius, density, motion, hero-variant, etc.)
-- **Section generation prompts** (Phase 3.5) — the per-component AI calls reference both this skill AND `design.md` AND `DESIGN_RULES.md` to construct the actual `.astro` files in `src/components/generated/`
-- **Content generation** (Phase 4) — copywriting rules from this skill (no filler verbs, no fake numbers, concrete actions) flow into hero/services/CTA content
+This file is a **craft cookbook** for humans and for promoting rules upward. It is **not** concatenated into brand-dna or section-generate today.
 
-When you have feedback like *"the hero text shouldn't be centered on cosmetic-clinic builds"* — that belongs in **this file's Rule 3**. When it's *"use Cormorant for cosmetic-clinic display fonts"* — that's the project-specific `design.md`. When it's *"never commit the generated/ folder to gitignore"* — that's `BUILD_BEST_PRACTICES.md` (out of scope here).
+When you learn a durable best practice: put universal bans in principles-core (+ anti-slop id); put template-specific look in the catalog entry; put section execution detail in the matching Impeccable reference.

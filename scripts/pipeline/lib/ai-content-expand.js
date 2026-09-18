@@ -89,9 +89,11 @@ ${kindGuidance}
 
 - **No fabrication.** Do not invent credentials, statistics, awards, or quotes. If you don't know whether the practice offers something, write generally about the topic, not a claim about this practice.
 - **No generic boilerplate.** Avoid phrases like "your trusted partner", "second to none", "we care about your smile", "comprehensive care", or "your healthiest smile starts here". These are template tells.
+- **No gatekeeping.** Do not write "this is not that office", "not the usual dentist", or "if you want X, go elsewhere". Be helpful. Describe what happens here.
 - **Direct answer up top.** Within the first two paragraphs, plainly answer the obvious question this page is about. LLMs need an extractable answer.
 - **Comprehensive coverage.** A reader skimming H2s should see the structure of the topic. Use 3–5 H2 subheadings to organize. Use markdown ## for subheads.
 - **Specifics over marketing.** Concrete: "A typical filling appointment takes 30–60 minutes." Generic: "We make sure you're comfortable." Choose the concrete every time.
+- **Don't perform honesty.** Do not write as if you must prove you are truthful or different. No "actually", "the real difference", "not a slogan", "so you can see what we see". State the fact and stop.
 - **One FAQ block at the end** with 3–5 real questions a patient would ask, answered plainly. This is gold for AI citation.
 - **Local context** mentioned 1–3 times naturally (the city, neighborhood, "patients in ${city || 'the area'}"). Don't keyword-stuff.
 - **Markdown output.** Use ## for subheadings, paragraphs separated by blank lines, plain bullet lists where natural.

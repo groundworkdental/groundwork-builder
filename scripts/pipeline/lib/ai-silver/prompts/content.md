@@ -73,7 +73,9 @@ WEBSITE: {{baseUrl}}
    - "What to Expect at Your First Visit" walkthroughs
    - Mission/values lists
    - Sustainability or eco-friendly statements
-   Capture each distinct content block as one entry. Cap at 12 entries.
+   Capture each distinct content block as one entry. Cap at {{acCap}} entries.
+   The cap is a ceiling, not a target: return what the site actually has. If the
+   practice only has four distinct blocks worth keeping, return four.
 5. **No fabrication** — every value comes from the page text. Null if absent.
 6. **stats inference** — "over 30 years serving Long Beach" maps to yearsExperience: 30. "Since 1989" → years from 1989 to current year. If unsure, null.
 

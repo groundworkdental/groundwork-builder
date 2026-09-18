@@ -1,33 +1,37 @@
 # Design Principles — Shared Core
 
-> **Single source of design truth.** This is the canonical tenet set consumed by BOTH ends of the
-> Build→Audit loop, so the thing that GENERATES and the thing that JUDGES are calibrated to the same
-> standard (without this, the refine loop chases a moving target and never converges):
+> **Universal floor** for the Build→Audit loop (generate and judge share the same standard):
 >
-> - **Generator** (Step 6 — layout director + `generate-sections`): builds toward §A tenets.
-> - **Judge** (Step 7 — pixel-quality): scores the render against the §B screenshot-observable signals.
+> - **Generator** (layout director + section generate): builds toward §A tenets.
+> - **Judge** (pixel-quality / critique): scores against §B screenshot-observable signals.
 >
-> Detailed, stack-specific guidance lives in `design.md` (project brand judgment) and `taste-frontend.md`
-> (framework-agnostic craft + dials). Those are the generator's deep references; THIS file is the shared
-> distillation both ends agree on. Where they conflict, project rules (`design.md`) win.
+> **Ownership:** THIS file = universal floor. Practice identity elevation = thin
+> `skills/design.md` (brand-dna only). Template look = catalog `entry.json`.
+> Section craft = Impeccable refs (`lib/impeccable.js`). `taste-frontend.md` is a
+> human/craft reference — not injected into brand-dna. Ship bans mirror §A9 in
+> `lib/audit/anti-slop.js` (keep ban IDs in sync).
 
 ---
 
 ## §A — Tenets (what "good" means)
 
-1. **Elevated, not reinvented.** Keep the practice's own character; make it the best version of itself.
-   Never a generic category rebrand.
+1. **Small identity anchor, strong elevation.** Keep a thin thread from the practice (usually primary
+   hue). Prefer a polished modern system over scrape-cloning. Weak originals get more freedom; never
+   a generic category rebrand.
 2. **Intentional color.** One dominant neutral base, ≤1 saturated accent (<80% sat), 60/30/10 distribution.
    Warm-with-warm / cool-with-cool — never mix temperatures without a bridge. No pure black (`#000`).
+   No global mood→palette recipes (diversity from scrape anchor + catalog template).
 3. **Hierarchy by weight + space, not just size.** A clear single focal point; scannable order; restraint
    over oversized H1s.
 4. **Distinctive, readable type.** Heading font with character; body font that disappears. Serif+sans is
-   the safe pairing. Not Inter/Roboto/Open Sans as the "premium" default.
-5. **Layout variety, anti-cliché.** Avoid the centered-text-over-dark-photo hero and the 3-equal-card row.
-   Prefer asymmetric/split/editorial when brand variance allows. Vary section rhythm (spacing/density).
+   the safe pairing. Not Inter/Roboto/Open Sans as the "premium" default. (Final faces: curated
+   pairings / catalog type bucket — not LLM free-pick.)
+5. **Layout variety, anti-cliché.** Avoid the centered-text-over-dark-photo hero and the 3-equal-card row
+   unless a catalog reference sanctions the pattern. Prefer asymmetric/split/editorial when allowed.
+   Vary section rhythm (spacing/density).
 6. **Card restraint + refined materiality.** Cards only when elevation signals hierarchy; otherwise
    hairlines/whitespace. Tinted soft shadows, never gray box-shadow glows or neon.
-7. **Coherence.** Color + type + shape + spacing read as ONE system with a point of view.
+7. **Coherence.** Color + type + shape + spacing read as ONE system with a clear point of view.
 8. **Accessible by construction.** WCAG AA: 4.5:1 body, 3:1 large/UI. Visible focus states.
 9. **No AI-slop tells** (the homogeneity every model converges on — ref: impeccable). Avoid:
    - **Type:** Inter/Roboto/Arial/system-default as the display face; oversized H1 with no supporting hierarchy.
@@ -88,5 +92,5 @@ When the judge flags a low dimension, route the fix to its OWNER (never patch th
 - brandCoherence/contrast → **brand-dna** tokens
 - layoutComposition/polish (cliché layout, card overuse) → **layout director / variant** choice
 - off/irrelevant hero → **image binding** hero selection
-- typography generic → **brand-dna** font choice
+- typography generic → **font-pairings / catalog type bucket** (not free LLM pick)
 Candidate fix-actions already in the repo: `skill-bolder`, `skill-colorize`, `skill-critique`.

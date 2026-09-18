@@ -23,7 +23,7 @@ export async function run({ dna, practice, files = {}, screenshots = [], referen
 
   // Show up to 4 screenshots so the model sees the full visual picture
   const imageBlocks = screenshots.slice(0, 4).flatMap(s => [
-    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: s.base64 } },
+    { type: 'image', source: { type: 'base64', media_type: s.mediaType || 'image/png', data: s.base64 } },
     { type: 'text', text: `Screenshot: ${s.route} @ ${s.viewport?.w}×${s.viewport?.h}` },
   ]);
 

@@ -92,13 +92,25 @@ export async function runContentCoverage({
   const siteFile       = finalConfigPath || resolve(outputDir, 'src/config/site.ts');
   const navFile        = resolve(outputDir, 'src/config/navigation.ts');
   const imageRolesFile = resolve(outputDir, '_pipeline/09-image-roles.json');
+  const redirectsFile  = resolve(outputDir, 'public/_redirects');
+  const silverFile     = resolve(outputDir, '_pipeline/01-scrape.json');
   const teamPhotoDir   = resolve(outputDir, 'public/images/team');
   const finalPagesDir  = resolve(outputDir, 'src/pages');
 
-  const bronze     = await tryReadJson(bronzeFile);
+  // Artifacts are written wrapped as { step, timestamp, output } but older runs
+  // (and direct callers) pass the raw bronze object. Every check below reads
+  // `bronze.pages`, so reading the wrapper handed them an empty page list and
+  // silently disabled the whole bronze-vs-final diff.
+  const bronzeRaw  = await tryReadJson(bronzeFile);
+  const bronze     = bronzeRaw?.output ?? bronzeRaw;
+  // Silver is the authority on who counts as staff — the check compares its
+  // output to the built site rather than guessing from image filenames.
+  const silverRaw  = await tryReadJson(silverFile);
+  const silver     = silverRaw?.output ?? silverRaw;
   const siteTs     = await tryReadText(siteFile);
   const navTs      = await tryReadText(navFile);
   const imageRoles = (await tryReadJson(imageRolesFile))?.output || null;
+  const redirectsTxt = await tryReadText(redirectsFile);
   const teamPhotos = await tryReadDir(teamPhotoDir);
   const finalPages = await tryReadDir(finalPagesDir);
 
@@ -106,10 +118,11 @@ export async function runContentCoverage({
 
   // Each checker is wrapped in try/catch so one failure doesn't tank the rest
   await safe(() => checkDoctors(findings,           { bronze, siteTs }));
-  await safe(() => checkStaff(findings,             { bronze, siteTs, teamPhotos }));
+  await safe(() => checkStaff(findings,             { bronze, siteTs, silver }));
   await safe(() => checkNavigation(findings,        { bronze, navTs }));
   await safe(() => checkInformationalPages(findings,{ bronze, finalPages }));
   await safe(() => checkServicePages(findings,      { bronze, siteTs, finalPages, outputDir }));
+  await safe(() => checkRedirectsToRoot(findings,   { bronze, redirectsTxt }));
   await safe(() => checkDoctorPortraits(findings,   { siteTs, imageRoles, teamPhotos }));
   await safe(() => checkPhone(findings,             { bronze, siteTs }));
   await safe(() => checkAddress(findings,           { bronze, siteTs }));
@@ -349,46 +362,53 @@ function checkDoctors(findings, { bronze, siteTs }) {
  * Staff / team members (non-doctor clinicians and support staff).
  * Bronze ground-truth: existence of /meet-our-team page + `team/team-*.jpg` photos.
  */
-function checkStaff(findings, { bronze, siteTs, teamPhotos }) {
-  if (!bronze) return;
+function checkStaff(findings, { bronze, siteTs, silver }) {
+  // Compare structured data to structured data.
+  //
+  // This used to count files: any `team-N-*.jpg` in public/images/team not
+  // matching `-dr-` was treated as a staff member. On the reference site that
+  // matched `team-1-index-services-1a.jpg` and `team-2-index-services-2a.jpg`
+  // — two decorative images from the homepage services strip — and reported
+  // "2 team members lost" for a practice whose site names no staff at all. The
+  // count moved between runs (8, 7, 4, 2) purely with what the image downloader
+  // happened to grab, because it was never measuring people.
+  //
+  // Silver decides who is staff (providers pass, `staff[]`). This only checks
+  // whether what silver found survived into the built site.
+  const extracted = Array.isArray(silver?.staff) ? silver.staff.filter(s => s?.name) : [];
 
-  const hasTeamPage = (bronze.pages || []).some(p => /^\/meet-(our|the)-team/i.test(p.path || ''));
-  // Filter out doctor photos (team-*-dr-*.jpg) — these are doctors with their portrait re-housed in team/
-  const teamMemberPhotos = (teamPhotos || []).filter(f =>
-    /^team-\d+/i.test(f) && !/-dr-/i.test(f)
-  );
-
-  const bronzeStaffCount = teamMemberPhotos.length;
-  if (!hasTeamPage && bronzeStaffCount === 0) return;  // no team page, no staff photos → nothing to check
-
-  // Final: parse `staff` array from site.ts if present
-  let finalStaffCount = 0;
+  let rendered = 0;
   if (siteTs) {
     const arr = extractArrayLiteral(siteTs, 'staff');
-    if (Array.isArray(arr)) finalStaffCount = arr.length;
+    if (Array.isArray(arr)) rendered = arr.length;
   }
 
-  if (bronzeStaffCount > 0 && finalStaffCount === 0) {
+  if (extracted.length > 0 && rendered === 0) {
     findings.push({
       severity: SEVERITY.CRITICAL,
       category: 'staff',
       check: 'staff-loss',
-      message: `Staff: bronze had ${bronzeStaffCount} team members, final has 0 (LOSS)`,
-      detail: {
-        bronzeTeamPhotos: teamMemberPhotos,
-        hasTeamPage,
-      },
-      hint: 'silver schema has no staff[] field — ai-silver.js drops non-doctor team members. Photos were downloaded to public/images/team/ but never wired up to site.ts.',
+      message: `Staff: silver extracted ${extracted.length} team member(s), final site has 0 (LOSS)`,
+      detail: { extracted: extracted.map(s => s.name).slice(0, 20) },
+      hint: 'silver.staff[] was populated but did not reach site.ts. Check injectSiteConfig and the merger.',
     });
-  } else if (hasTeamPage && finalStaffCount === 0 && bronzeStaffCount === 0) {
-    // Bronze had a team page but no photos surfaced — softer signal
+    return;
+  }
+
+  // Silver found nobody, but the source site has a team page — either the
+  // practice genuinely names no staff (common, and fine) or extraction missed
+  // them. A warning, not a loss: there is no evidence anything was dropped.
+  const hasTeamPage = (bronze?.pages || []).some(p =>
+    /^\/(meet-(our|the|your)-team|our-team|team|staff)/i.test(p.path || '')
+  );
+  if (extracted.length === 0 && rendered === 0 && hasTeamPage) {
     findings.push({
       severity: SEVERITY.WARNING,
       category: 'staff',
       check: 'team-page-no-staff',
-      message: `Bronze had a /meet-our-team page but final site has 0 staff entries`,
+      message: 'Source site has a team page but silver extracted 0 staff member(s)',
       detail: { hasTeamPage },
-      hint: 'silver schema has no staff[] field. Even when team photos are not auto-paired, the names from the team page should be captured.',
+      hint: 'Either the practice names only doctors (no action needed) or the providers pass missed non-doctor staff.',
     });
   }
 }
@@ -447,6 +467,58 @@ function checkNavigation(findings, { bronze, navTs }) {
  * Informational pages — anything in bronze that isn't a homepage/service/team/about/contact/blog/form page.
  * Examples: "What Sets Us Apart", "Office Tour", "Patient Forms", "Patient Testimonials".
  */
+/**
+ * A 301 to the bare homepage is the redirect map conceding it had nowhere to
+ * put a page. For a page that carried real content that is silent loss: the URL
+ * keeps resolving, so nothing 404s and no other check fires.
+ *
+ * Homepage aliases and soft-dups genuinely belong at `/` — those pages either
+ * ARE the homepage or served its content — so only pages bronze saw with
+ * substantive unique copy count as losses.
+ */
+const HOMEPAGE_ALIAS = /^\/(?:index|home|default|main)(?:\.(?:html?|php|aspx?))?\/?$/i;
+const REDIRECT_LOSS_MIN_WORDS = 150;
+
+function checkRedirectsToRoot(findings, { bronze, redirectsTxt }) {
+  if (!redirectsTxt || !bronze) return;
+
+  const softDupPaths = new Set(
+    (bronze.coverage?.softDups || bronze.softDups || []).map(d => (d.path || '').toLowerCase())
+  );
+  const wordsByPath = new Map(
+    (bronze.pages || []).map(p => [(p.path || '').toLowerCase(), p.wordCount || 0])
+  );
+
+  const losses = [];
+  for (const line of redirectsTxt.split('\n')) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 2) continue;
+    const [from, to] = parts;
+    if (to !== '/') continue;
+
+    const key = from.toLowerCase();
+    if (HOMEPAGE_ALIAS.test(key)) continue;   // alias of the homepage itself
+    if (softDupPaths.has(key)) continue;      // served homepage content already
+
+    const words = wordsByPath.get(key) ?? wordsByPath.get(key.replace(/\/$/, '')) ?? 0;
+    if (words >= REDIRECT_LOSS_MIN_WORDS) losses.push({ path: from, wordCount: words });
+  }
+
+  if (losses.length === 0) return;
+
+  losses.sort((a, b) => b.wordCount - a.wordCount);
+  const totalWords = losses.reduce((sum, l) => sum + l.wordCount, 0);
+
+  findings.push({
+    severity: SEVERITY.CRITICAL,
+    category: 'redirects',
+    check: 'redirect-to-root-loss',
+    message: `${losses.length} page(s) with real content 301 to the homepage — ${totalWords.toLocaleString()} words unmapped (LOSS)`,
+    detail: { losses: losses.slice(0, 20) },
+    hint: 'A redirect to bare / means the rebuild had no destination for this page. Give it a page, merge its content into a related one and redirect there, or drop it deliberately — but do not point real content at the homepage.',
+  });
+}
+
 function checkInformationalPages(findings, { bronze, finalPages }) {
   if (!bronze) return;
 
