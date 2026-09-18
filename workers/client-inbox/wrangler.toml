@@ -1,0 +1,18 @@
+name = "groundwork-client-inbox"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+
+# Writes straight into the ops ledger. A binding rather than the REST API:
+# no token to leak, no network hop, and the worker cannot reach any other
+# database by accident.
+[[d1_databases]]
+binding = "DB"
+database_name = "groundwork-ops"
+database_id = "25adf813-d0cc-4d4d-9010-51ac4fd7a5ae"
+
+[vars]
+# Every message is forwarded here after logging, so mail is never trapped
+# inside the system. Losing a client email to a parser bug is not a tradeoff
+# worth making for tidiness.
+FORWARD_TO = "hello@groundworkdental.com"
