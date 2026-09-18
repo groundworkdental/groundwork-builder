@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @config "../../tailwind.config.mjs";
-/* Colour tokens — every colour class below resolves through these. */
+/* Color tokens — every color class below resolves through these. */
 @import "./tokens.css";
 
 @layer base {
