@@ -2,6 +2,8 @@ node_modules/
 dist/
 .astro/
 .env
+.env.*
+!.env.example
 *.log
 .DS_Store
 google-service-account.json
@@ -16,6 +18,12 @@ _test-batch/
 
 # Generated client site trees (full Astro copies) — never commit
 clients/
+
+# Per-prospect report artifacts staged for the groundwork-reports Pages
+# project (direct-upload deploy replaces the full asset set, so this dir
+# must persist locally — like clients/). Functions + README are committed.
+reports-site/public/audits/
+reports-site/public/pitch/
 
 # Local pipeline memory / caches
 _memory/runs.jsonl

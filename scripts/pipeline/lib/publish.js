@@ -8,8 +8,9 @@
  *   4. Run PageSpeed on the now-live preview — real after-scores
  *   5. Run rescan against the preview — diff vs original audit
  *   6. Generate pitch.html (with real after-scores)
- *   7. Copy pitch.html into groundwork-dental and host updated audit folder
- *   8. Git commit + push groundwork-dental — pitch + before/after go live
+ *   7. Stage pitch.html + updated audit folder into reports-site/ and
+ *      direct-upload deploy the groundwork-reports Pages project
+ *      (reports.groundworkdental.com) — the marketing repo is not touched
  *   5b. Evaluate ship gates (mobile perf ≥ 90, Lighthouse a11y ≥ 90, 0 axe critical/serious)
  *   9. Write Airtable Build row — Pitched if gates pass, Blocked if not
  *
@@ -24,7 +25,8 @@
  * Required env vars:
  *   CLOUDFLARE_API_TOKEN     — CF API token with Pages:Edit permission
  *   CLOUDFLARE_ACCOUNT_ID    — CF account ID
- *   GROUNDWORK_DENTAL_PATH   — absolute path to groundwork-dental repo (optional, defaults below)
+ *   REPORTS_DOMAIN           — reports host (default: reports.groundworkdental.com)
+ *   REPORTS_PAGES_PROJECT    — reports Pages project (default: groundwork-reports)
  *   AIRTABLE_API_KEY            — Airtable personal access token
  *   AIRTABLE_BASE_ID            — Airtable base ID
  *   AIRTABLE_ACCOUNTS_TABLE     — Accounts table name
@@ -36,7 +38,7 @@
  */
 
 import { execSync }                        from 'node:child_process';
-import { copyFile, mkdir, readFile }       from 'node:fs/promises';
+import { readFile }                        from 'node:fs/promises';
 import { existsSync }                      from 'node:fs';
 import { resolve, dirname, basename }      from 'node:path';
 import { generatePitchPage }              from './pitch-generator.js';
@@ -70,7 +72,8 @@ export async function publish(opts = {}) {
 
   const baseDomain  = process.env.GROUNDWORK_SUBDOMAIN || 'groundworkdental.com';
   const resolvedPreviewUrl = previewUrl || `${slug}.${baseDomain}`;
-  const pitchUrl    = `${baseDomain}/pitch/${slug}`;
+  const { reportsDomain, stagePitchPage, hostAuditReport } = await import('./host-reports.js');
+  const pitchUrl    = `${reportsDomain()}/pitch/${slug}`;
 
   console.log('');
   console.log('[Publish] Starting publish pipeline...');
@@ -94,8 +97,6 @@ export async function publish(opts = {}) {
   // scripts/pipeline/lib/publish.js — three levels up is the repo root,
   // four was the previous (broken) value pointing at the parent dir.
   const repoRoot   = resolve(dirname(new URL(import.meta.url).pathname), '..', '..', '..');
-  const dentalPath = process.env.GROUNDWORK_DENTAL_PATH
-    || resolve(repoRoot, '..', 'groundwork-dental');
 
   // ── 1. Ensure CF Pages project + domain exist BEFORE the push ──
   // CF Pages will auto-deploy whatever main branch contains on next push,
@@ -126,6 +127,21 @@ export async function publish(opts = {}) {
     }
   } catch (err) {
     console.warn(`  ⚠ Monorepo push failed: ${err.message}`);
+    try {
+      const dist = resolve(outputDir, 'dist');
+      if (existsSync(resolve(dist, 'index.html'))) {
+        console.log('  Falling back to wrangler pages deploy of dist/ (clients/ is gitignored)...');
+        execSync(
+          `npx wrangler pages deploy "${dist}" --project-name "${slug}" --commit-dirty=true`,
+          { cwd: outputDir, stdio: 'inherit', env: process.env },
+        );
+        pushedNewDeploy = true;
+        results.gitBuilder = 'wrangler-direct';
+        console.log(`  ✓ Wrangler deployed dist/ → ${slug}`);
+      }
+    } catch (deployErr) {
+      console.warn(`  ⚠ Wrangler fallback failed: ${deployErr.message}`);
+    }
   }
 
   // ── 3. Wait for the deploy via CF Pages API ──
@@ -305,54 +321,38 @@ export async function publish(opts = {}) {
     console.warn(`  ⚠ Pitch generation failed: ${err.message}`);
   }
 
-  // ── 7a. Copy pitch.html to groundwork-dental (only when gates pass) ──
+  // ── 7a. Stage pitch.html into reports-site (only when gates pass) ──
   try {
     if (results.handoffBlocked) {
       console.warn(`  ⚠ Pitch not published — ship gates must pass before handoff`);
-    } else if (existsSync(dentalPath) && results.pitchHtml) {
-      const destDir = resolve(dentalPath, 'public', 'pitch', slug);
-      await mkdir(destDir, { recursive: true });
-      const destFile = resolve(destDir, 'index.html');
-      await copyFile(results.pitchHtml, destFile);
-      results.pitchLive = destFile;
-      console.log(`  ✓ Pitch copied to groundwork-dental: public/pitch/${slug}/index.html`);
-    } else if (!existsSync(dentalPath)) {
-      console.warn(`  ⚠ groundwork-dental not found at ${dentalPath} — skipping pitch copy`);
+    } else if (results.pitchHtml) {
+      results.pitchLive = await stagePitchPage({ pitchHtml: results.pitchHtml, slug });
+      console.log(`  ✓ Pitch staged: reports-site/public/pitch/${slug}/index.html`);
     }
   } catch (err) {
-    console.warn(`  ⚠ Pitch copy failed: ${err.message}`);
+    console.warn(`  ⚠ Pitch staging failed: ${err.message}`);
   }
 
-  // ── 7b. Host updated audit folder (now contains audit-report-after.html) ──
-  // hostAuditReport() copies the audit-report-after.html into the dental
-  // repo and does its OWN commit+push. So the dental repo will see two
-  // commits — one from us in step 8 (pitch), one from host-reports here
-  // (audit folder). That's fine; they touch different folders.
+  // ── 7b. Host audit folder + pitch — one direct-upload deploy ──
+  // hostAuditReport() stages the audit files (incl. audit-report-after.html)
+  // next to the pitch staged above, then deploys the whole reports site.
   let hostedReports = { indexUrl: null, beforeAfterUrl: null, skippedReason: null };
   try {
-    const { hostAuditReport } = await import('./host-reports.js');
     const auditDir = resolve(repoRoot, '_audits', slug);
     hostedReports = await hostAuditReport({ auditDir, slug });
-    if (hostedReports.pushed && hostedReports.beforeAfterUrl) {
-      console.log(`  ✓ Before/after report: ${hostedReports.beforeAfterUrl}`);
+    if (hostedReports.pushed) {
+      results.gitDental = 'reports-deployed';
+      if (hostedReports.beforeAfterUrl) {
+        console.log(`  ✓ Before/after report: ${hostedReports.beforeAfterUrl}`);
+      }
+      if (results.pitchLive) {
+        console.log(`  ✓ Reports site deployed → pitch live at https://${pitchUrl}`);
+      }
+    } else if (hostedReports.skippedReason) {
+      console.warn(`  ⚠ Reports deploy skipped: ${hostedReports.skippedReason}`);
     }
   } catch (err) {
-    console.warn(`  ⚠ Host before/after failed (non-fatal): ${err.message}`);
-  }
-
-  // ── 8. Git push dental — pitch page goes live (only when gates pass) ──
-  try {
-    if (results.handoffBlocked) {
-      // pitch stays in _pipeline/pitch.html for operator review only
-    } else if (results.pitchLive && existsSync(dentalPath)) {
-      gitCommitPush(dentalPath, `feat: add pitch page for ${slug}`, [
-        `public/pitch/${slug}`,
-      ]);
-      results.gitDental = 'pushed';
-      console.log(`  ✓ groundwork-dental pushed → pitch page will go live`);
-    }
-  } catch (err) {
-    console.warn(`  ⚠ groundwork-dental push failed: ${err.message}`);
+    console.warn(`  ⚠ Reports hosting failed (non-fatal): ${err.message}`);
   }
 
   // ── 8b. Handoff baseline snapshot (when gates pass) ──
