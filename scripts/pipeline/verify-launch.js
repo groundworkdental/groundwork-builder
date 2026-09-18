@@ -497,6 +497,183 @@ function checkMetaDescriptions(pages) {
 
 
 /**
+ * Every tel: link must be attributable and dialable.
+ *
+ * Two Mansfield-era bugs live here. Calls turned out to be the primary
+ * conversion, but GA4 could only say "a call happened," not which surface
+ * drove it — until every tel: anchor carried a data-phone-location tag
+ * (header, footer, cta-band, ...). And tel: hrefs that interpolate the
+ * display string ship parens and spaces inside the URL, which some dialers
+ * reject; hrefs must be digits (E.164-ish), display text stays pretty.
+ */
+function checkTelLinks(pages) {
+  const unlabeled = [];
+  const undialable = [];
+  for (const [route, html] of pages) {
+    for (const m of html.matchAll(/<a\b[^>]*href="tel:([^"]+)"[^>]*>/gi)) {
+      const tag = m[0];
+      const number = m[1];
+      if (!/data-phone-location=/.test(tag)) unlabeled.push(route);
+      if (/[\s()\-.]/.test(number.replace(/^\+/, '').trim()) || /%20|\(/.test(number)) {
+        undialable.push(`${route} → tel:${number}`);
+      }
+    }
+  }
+  if (unlabeled.length || undialable.length) {
+    const parts = [];
+    if (unlabeled.length) {
+      parts.push(
+        `${unlabeled.length} tel: link(s) without data-phone-location (GA4 cannot ` +
+          `attribute the call to a surface): ${[...new Set(unlabeled)].slice(0, 4).join(', ')}`,
+      );
+    }
+    if (undialable.length) {
+      parts.push(
+        `${undialable.length} tel: href(s) carrying display formatting instead of ` +
+          `digits: ${undialable.slice(0, 3).join(', ')}`,
+      );
+    }
+    fail('tel links', parts.join('; '));
+    return;
+  }
+  pass('tel links', 'all tel: anchors labeled for attribution and digit-only');
+}
+
+/**
+ * Node must be pinned in BOTH .nvmrc and wrangler.toml.
+ *
+ * Cloudflare Pages defaults to a Node that Astro 6 refuses, and the two pins
+ * serve different masters: .nvmrc is what a human's shell picks up,
+ * NODE_VERSION in wrangler.toml is what Cloudflare's build system reads.
+ * Mansfield shipped each fix separately, a broken deploy apart. Pin both at
+ * once or the half you skipped fails later, on someone else's machine.
+ */
+async function checkNodePinning(clientDir) {
+  const nvmrc = (await readMaybe(join(clientDir, '.nvmrc')))?.trim() || null;
+  const toml = await readMaybe(join(clientDir, 'wrangler.toml'));
+  const tomlPin = toml ? /NODE_VERSION\s*=/.test(toml) : null;
+
+  if (toml && !tomlPin) {
+    fail(
+      'node pinning',
+      'wrangler.toml exists but declares no NODE_VERSION — Cloudflare Pages ' +
+        "builds with its default Node, which Astro 6 rejects. Pin it in [vars].",
+    );
+    return;
+  }
+  if (!nvmrc) {
+    warn(
+      'node pinning',
+      'no .nvmrc — local shells and CI without wrangler context fall back to ' +
+        'whatever Node is ambient. Pin the same major as wrangler.toml.',
+    );
+    return;
+  }
+  pass('node pinning', `.nvmrc=${nvmrc}${toml ? ', wrangler.toml NODE_VERSION set' : ''}`);
+}
+
+/**
+ * The homepage must carry the two blobs Google actually reads first:
+ * a LocalBusiness-family JSON-LD with a dialable telephone and an address,
+ * and an og:image. Mansfield launched with neither complete; both were
+ * found by hand afterwards. Other pages missing og:image is only advisory —
+ * shares still fall back to the homepage card.
+ */
+function checkHomepageSeo(pages) {
+  const home = pages.find(([route]) => route === '/index.html');
+  if (!home) {
+    warn('homepage seo', 'no /index.html in dist — cannot check schema/og:image');
+    return;
+  }
+  const [, html] = home;
+  const problems = [];
+
+  const ldBlocks = [...html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)]
+    .map((m) => m[1]);
+  const business = ldBlocks.find((b) => /"@type"\s*:\s*"?\[?[^"]*?(Dentist|LocalBusiness|MedicalBusiness|Orthodontic)/i.test(b));
+  if (!business) {
+    problems.push('no LocalBusiness/Dentist JSON-LD on the homepage');
+  } else {
+    if (!/"telephone"\s*:\s*"[^"]+"/.test(business)) problems.push('schema is missing telephone');
+    if (!/"address"\s*:/.test(business)) problems.push('schema is missing address');
+  }
+  if (!/property="og:image"\s+content="[^"]+"/i.test(html) &&
+      !/content="[^"]+"\s+property="og:image"/i.test(html)) {
+    problems.push('no og:image on the homepage');
+  }
+
+  if (problems.length) {
+    fail('homepage seo', problems.join('; '));
+    return;
+  }
+
+  const missingOg = pages
+    .filter(([, h]) => !/property="og:image"|og:image"\s+content|content="[^"]*"\s+property="og:image"/i.test(h))
+    .map(([r]) => r)
+    .filter((r) => !/^\/404\.html$/.test(r));
+  if (missingOg.length) {
+    warn('homepage seo', `homepage complete; ${missingOg.length} other page(s) lack og:image: ${missingOg.slice(0, 4).join(', ')}`);
+    return;
+  }
+  pass('homepage seo', 'LocalBusiness schema (telephone + address) and og:image present');
+}
+
+/**
+ * robots.txt and the sitemap must agree on which origin this site is.
+ *
+ * Mansfield's robots.txt pointed its Sitemap: line at the wrong origin, so
+ * Search Console rejected the submission — while the sitemap itself was fine.
+ * Cross-checking the two catches a wrong `site` in astro.config, a stale
+ * template origin, or a preview hostname about to be handed to Google.
+ */
+async function checkOriginAgreement(distDir) {
+  const robots = await readMaybe(join(distDir, 'robots.txt'));
+  const sitemap = await readMaybe(join(distDir, 'sitemap-0.xml'));
+  if (!robots || !sitemap) {
+    pass('origin agreement', 'robots.txt or sitemap missing — covered by other gates');
+    return;
+  }
+  const robotsHost = robots.match(/Sitemap:\s*https?:\/\/([^/\s]+)/i)?.[1] || null;
+  const locHost = sitemap.match(/<loc>https?:\/\/([^/<]+)/i)?.[1] || null;
+  if (robotsHost && locHost && robotsHost !== locHost) {
+    fail(
+      'origin agreement',
+      `robots.txt says the sitemap lives on ${robotsHost} but sitemap URLs are ` +
+        `on ${locHost} — Search Console will reject one of them. Fix the origin.`,
+    );
+    return;
+  }
+  if (locHost && /\.pages\.dev$/i.test(locHost)) {
+    warn(
+      'origin agreement',
+      `sitemap URLs point at ${locHost} — a preview host. Fine for a cold-build ` +
+        'preview; must change before the live-domain cutover.',
+    );
+    return;
+  }
+  pass('origin agreement', `robots.txt and sitemap agree on ${locHost || 'origin'}`);
+}
+
+/**
+ * GA4 wiring is advisory: a cold-build preview may deliberately ship without
+ * a measurement id, but a LIVE site missing one collects nothing forever —
+ * Mansfield's id was silently dropped for three deploys because wrangler.toml
+ * superseded the dashboard variable. Absence is worth a line either way.
+ */
+function checkGa4(pages) {
+  const withGa4 = pages.filter(([, h]) => /G-[A-Z0-9]{6,}/.test(h)).length;
+  if (!withGa4) {
+    warn(
+      'ga4',
+      'no G-XXXXXXX measurement id in any page — expected on a cold preview, ' +
+        'a silent data loss on a live site. Verify before the domain cutover.',
+    );
+    return;
+  }
+  pass('ga4', `measurement id present on ${withGa4}/${pages.length} page(s)`);
+}
+
+/**
  * A built 404.html is what makes Pages answer 404 at all.
  *
  * With none, it falls back to index.html with a 200 for unmatched routes, so
@@ -547,10 +724,15 @@ async function main() {
 
   checkContactPath(pages);
   checkEmptyHrefs(pages);
+  checkTelLinks(pages);
   checkPlaceholders(pages, robotsTxt);
+  checkHomepageSeo(pages);
+  checkGa4(pages);
   await checkSitemapVsRedirects(distDir, pages);
   await checkAssetReferences(distDir, pages);
   checkMetaDescriptions(pages);
+  await checkOriginAgreement(distDir);
+  await checkNodePinning(clientDir);
   await check404(distDir);
   await checkWorkingTree(clientDir);
   await checkImageSets(clientDir);
