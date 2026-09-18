@@ -77,6 +77,10 @@ function parseArgs() {
     skipContent: false,
     skipBuild: false,
     skipGenerate: false,
+    skipPagespeed: false,
+    skipSeoOptimize: false,
+    limit: null,
+    resumeFrom: null,
     dryRun: false,
     verbose: false,
     agent: true,
@@ -134,6 +138,36 @@ function parseArgs() {
         break;
       case '--skip-generate':
         opts.skipGenerate = true;
+        break;
+      case '--skip-pagespeed':
+        opts.skipPagespeed = true;
+        break;
+      case '--skip-seo-optimize':
+        opts.skipSeoOptimize = true;
+        break;
+      case '--limit':
+        opts.limit = parseInt(args[++i], 10);
+        if (!Number.isFinite(opts.limit) || opts.limit < 1) {
+          console.error('Error: --limit must be a positive integer');
+          process.exit(1);
+        }
+        break;
+      case '--resume-from':
+        // agent | seo — reload bronze/silver from outputDir/_pipeline and skip earlier phases
+        opts.resumeFrom = args[++i];
+        if (!['agent', 'seo'].includes(opts.resumeFrom)) {
+          console.error('Error: --resume-from must be agent|seo');
+          process.exit(1);
+        }
+        opts.skipScrape = true;
+        opts.skipImages = true;
+        opts.skipAudit = true;
+        opts.skipDesign = true;
+        opts.skipContent = true;
+        opts.skipGenerate = true;
+        if (opts.resumeFrom === 'seo') {
+          opts.agent = false;
+        }
         break;
       case '--dry-run':
         opts.dryRun = true;
@@ -213,11 +247,15 @@ Options:
   --client-id <slug>      Deprecated alias for --slug
   --output <path>    Output directory for new project
   --preset <name>    Vertical preset (default: dental)
-  --skip-scrape      Skip website scraping
+  --skip-scrape      Skip crawl; reload bronze/silver from outputDir/_pipeline when present
   --require-ready    Stop if the practice contract reports critical gaps
   --skip-images      Skip image downloading
   --skip-audit       Skip AI site audit
+  --skip-pagespeed   Skip PageSpeed Insights on existing site
+  --skip-seo-optimize Skip post-build SEO optimizer loop
   --skip-build       Skip build validation
+  --limit <n>        Max pages to crawl (default 500; use 30 for eval)
+  --resume-from <stage>  agent|seo — reload artifacts and jump to designer/SEO
   --reference <id>   Design-catalog entry id (examples/<id>.json or runs/<id>/entry.json),
                      a path, or "auto" (pick curated light run by content appetite
                      after scrape). Env fallback: GROUNDWORK_DEFAULT_REFERENCE.
@@ -322,81 +360,180 @@ async function main() {
   let scraped = null; // silver-shaped data (for downstream compatibility)
   let reviews = null;
 
-  if (opts.url && !opts.skipScrape) {
-    console.log(`[Phase 1a] Crawling ${opts.url} (bronze)...`);
+  // Provisional output dir (needed for status.json + --skip-scrape reload before merge)
+  const { slugFromUrl } = await import('./lib/slug.js');
+  const provisionalSlug = (opts.url && slugFromUrl(opts.url))
+    || opts.slug || opts.airtableSlug || opts.clientId || 'new-dental-site';
+  let provisionalOutputDir = opts.output
+    ? resolve(opts.output)
+    : resolve(opts.publish ? `clients/${provisionalSlug}` : `../output/${provisionalSlug}`);
+
+  // Keep eval-batch hang detection alive during silent Claude calls.
+  const { startHeartbeat } = await import('./lib/run-status.js');
+  const heartbeat = startHeartbeat(provisionalOutputDir);
+  const stopHeartbeat = () => { try { heartbeat.stop(); } catch { /* ignore */ } };
+  process.once('exit', stopHeartbeat);
+  process.once('SIGTERM', () => { stopHeartbeat(); process.exit(1); });
+
+  async function loadArtifact(name) {
     try {
-      bronze = await scrape(opts.url, { verbose: opts.verbose });
+      const { readFile: rf } = await import('node:fs/promises');
+      const raw = JSON.parse(await rf(resolve(provisionalOutputDir, '_pipeline', name), 'utf8'));
+      return raw.output !== undefined ? raw.output : raw;
+    } catch {
+      return null;
+    }
+  }
+
+  if (opts.url && !opts.skipScrape) {
+    heartbeat.setPhase('scrape');
+    console.log(`[Phase 1a] Crawling ${opts.url} (bronze)${opts.limit ? ` limit=${opts.limit}` : ''}...`);
+    try {
+      bronze = await scrape(opts.url, { verbose: opts.verbose, limit: opts.limit || undefined });
       stats.scrapedUrl = opts.url;
       console.log(`  Bronze: ${bronze.pageCount} pages crawled.`);
     } catch (err) {
-      console.error(`  Crawl failed: ${err.message}`);
+      const kind = err.scrapeKind || (err.code === 'UNABLE_TO_SCRAPE' ? 'empty' : 'http_error');
+      console.error(`  Crawl failed (${kind}): ${err.message}`);
       stats.errors.push(`Crawl failed: ${err.message}`);
+      const { writeRunStatus, recordUnableToScrape } = await import('./lib/run-status.js');
+      const { isTlsTrustFailure } = await import('./lib/scrape-probe.js');
+      const trustFailure = isTlsTrustFailure(kind);
+      await writeRunStatus(provisionalOutputDir, {
+        stage: 'scrape',
+        ok: false,
+        code: trustFailure ? 'tls_chain_incomplete' : 'unable_to_scrape',
+        kind,
+        url: opts.url,
+        message: err.message,
+        reference: referenceEntry?.id || null,
+      });
+      if (trustFailure) {
+        // Do NOT touch the sourcing status. This site serves fine to a browser;
+        // only our chain verification refused it, and writing the practice off
+        // as unable_to_scrape discards a live prospect. Leave the row as-is and
+        // tell the operator what would actually fix it.
+        console.error('');
+        console.error('  ⚠ This is a TLS trust failure, not a dead site. The server omits its');
+        console.error('    intermediate certificate; browsers and curl tolerate that, Node does not.');
+        console.error(`    Confirm with:  curl -sSI ${opts.url} | head -1`);
+        console.error('    To crawl it, supply the missing chain via NODE_EXTRA_CA_CERTS.');
+        console.error('    Sourcing status left unchanged — the prospect stays in the pipeline.');
+        console.error('');
+      } else {
+        const d1 = await recordUnableToScrape(opts.url, { kind, message: err.message });
+        console.error(`  Marked unable_to_scrape (D1 rows updated: ${d1.updated ?? 0}).`);
+      }
+      console.error(`  Skipping silver/build for this URL.\n`);
+      process.exit(2);
     }
     console.log('');
+
+    // Fail-fast: never spend silver tokens on empty bronze
+    if (!bronze?.pageCount) {
+      const { writeRunStatus, recordUnableToScrape } = await import('./lib/run-status.js');
+      await writeRunStatus(provisionalOutputDir, {
+        stage: 'scrape',
+        ok: false,
+        code: 'unable_to_scrape',
+        kind: 'empty',
+        url: opts.url,
+        message: '0 pages crawled',
+      });
+      await recordUnableToScrape(opts.url, { kind: 'empty' });
+      console.error('\n  ✗ FATAL: Bronze crawl returned 0 pages — unable_to_scrape.\n');
+      process.exit(2);
+    }
 
     // -----------------------------------------------------------------------
     // Phase 1b: AI Silver extraction — Bronze → structured PracticeData
     // -----------------------------------------------------------------------
-    if (bronze) {
-      console.log('[Phase 1b] Extracting silver data via Claude...');
-      try {
-        scraped = await extractSilver(bronze);
-        // Hard check — if silver came back essentially empty, fail loudly.
-        // Continuing with empty silver produces a garbage build downstream.
-        const isEmpty = !scraped?.practice?.name && !scraped?.doctor?.name && (scraped?.services?.offered?.length ?? 0) === 0;
-        if (isEmpty) {
+    heartbeat.setPhase('silver');
+    console.log('[Phase 1b] Extracting silver data via Claude...');
+    try {
+      scraped = await extractSilver(bronze);
+      const isEmpty = !scraped?.practice?.name && !scraped?.doctor?.name && (scraped?.services?.offered?.length ?? 0) === 0;
+      if (isEmpty) {
+        const hasIntakeInput = Boolean(opts.data || opts.slug || opts.airtableSlug || opts.clientId);
+        if (hasIntakeInput) {
+          console.warn('  ⚠ Silver is empty (coming-soon / thin site or API miss). Continuing with intake as the content source.');
+          scraped = scraped || {};
+          scraped.meta = { ...(scraped.meta || {}), silverEmpty: true, silverEmptyReason: 'no name/doctor/services' };
+        } else {
           throw new Error('Silver extraction returned empty data — likely a transient API failure. Re-run the pipeline.');
         }
-        console.log('  Silver extraction complete.');
-      } catch (err) {
-        console.error(`\n  ✗ FATAL: ${err.message}`);
-        console.error(`  The pipeline cannot produce a meaningful build without silver data.`);
-        console.error(`  Re-run with the same URL — bronze is cached and Phase 1a will be fast.\n`);
-        process.exit(1);
       }
-      console.log('');
-
-      // -----------------------------------------------------------------------
-      // Phase 1c: Scrape reviews from bronze (Google Maps / Yelp / schema.org)
-      // -----------------------------------------------------------------------
-      console.log('[Phase 1c] Scraping reviews from bronze...');
-      try {
-        reviews = await scrapeReviews(bronze);
-        if (reviews.source) {
-          console.log(`  Reviews: source=${reviews.source}, rating=${reviews.rating ?? '—'}, count=${reviews.reviewCount ?? '—'}, scraped=${reviews.reviews.length}`);
-          if (reviews.gmapsUrl) console.log(`  Google Maps URL found.`);
-          if (reviews.yelpUrl)  console.log(`  Yelp URL found.`);
-        } else {
-          console.log('  No review URLs found in bronze.');
-        }
-      } catch (err) {
-        console.warn(`  Review scrape failed: ${err.message}`);
-        reviews = null;
-      }
-      console.log('');
-
-      // -----------------------------------------------------------------------
-      // Phase 1d: AI image analysis (cached in _memory/images/<slug>.json)
-      // -----------------------------------------------------------------------
-      console.log('[Phase 1d] Analyzing images...');
-      const _imgSlug = opts.url
-        ? new URL(opts.url).hostname.replace(/^www\./, '').split('.')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
-        : 'unknown';
-      try {
-        bronze.imageAnalysis = await analyzeImages(bronze, _imgSlug, { verbose: opts.verbose });
-        const count = Object.keys(bronze.imageAnalysis).length;
-        console.log(`  ${count} images analyzed.`);
-        // Store slug for deferred artifact write after artifacts is initialized
-        bronze._imageAnalysisSlug = _imgSlug;
-      } catch (err) {
-        console.warn(`  Image analysis failed (non-fatal): ${err.message}`);
-        bronze.imageAnalysis = {};
-      }
-      console.log('');
-
+      console.log('  Silver extraction complete.');
+    } catch (err) {
+      console.error(`\n  ✗ FATAL: ${err.message}`);
+      console.error(`  The pipeline cannot produce a meaningful build without silver data.`);
+      console.error(`  Re-run with --skip-scrape --output ${provisionalOutputDir} after fixing silver, or re-crawl.\n`);
+      process.exit(1);
     }
-  } else if (opts.url && opts.skipScrape) {
-    console.log('[Phase 1] Skipping crawl (--skip-scrape).');
+    console.log('');
+
+    // -----------------------------------------------------------------------
+    // Phase 1c: Scrape reviews from bronze (Google Maps / Yelp / schema.org)
+    // -----------------------------------------------------------------------
+    console.log('[Phase 1c] Scraping reviews from bronze...');
+    try {
+      reviews = await scrapeReviews(bronze);
+      if (reviews.source) {
+        console.log(`  Reviews: source=${reviews.source}, rating=${reviews.rating ?? '—'}, count=${reviews.reviewCount ?? '—'}, scraped=${reviews.reviews.length}`);
+        if (reviews.gmapsUrl) console.log(`  Google Maps URL found.`);
+        if (reviews.yelpUrl)  console.log(`  Yelp URL found.`);
+      } else {
+        console.log('  No review URLs found in bronze.');
+      }
+    } catch (err) {
+      console.warn(`  Review scrape failed: ${err.message}`);
+      reviews = null;
+    }
+    console.log('');
+
+    // -----------------------------------------------------------------------
+    // Phase 1d: AI image analysis (cached in _memory/images/<slug>.json)
+    // -----------------------------------------------------------------------
+    console.log('[Phase 1d] Analyzing images...');
+    const _imgSlug = opts.url
+      ? new URL(opts.url).hostname.replace(/^www\./, '').split('.')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
+      : 'unknown';
+    try {
+      bronze.imageAnalysis = await analyzeImages(bronze, _imgSlug, { verbose: opts.verbose });
+      const count = Object.keys(bronze.imageAnalysis).length;
+      console.log(`  ${count} images analyzed.`);
+      bronze._imageAnalysisSlug = _imgSlug;
+    } catch (err) {
+      console.warn(`  Image analysis failed (non-fatal): ${err.message}`);
+      bronze.imageAnalysis = {};
+    }
+    console.log('');
+
+  } else if (opts.skipScrape) {
+    console.log('[Phase 1] Skipping crawl (--skip-scrape) — loading _pipeline artifacts if present...');
+    bronze = await loadArtifact('01-bronze.json');
+    scraped = await loadArtifact('01-scrape.json');
+    if (bronze) console.log(`  Reloaded bronze: ${bronze.pageCount ?? bronze.pages?.length ?? '?'} pages`);
+    if (scraped?.practice?.name) console.log(`  Reloaded silver: ${scraped.practice.name}`);
+    else if (!scraped) console.log('  No 01-scrape.json found — need --data/--slug intake or a prior crawl.');
+
+    // A resume must start from the same state a fresh crawl produces. Artifacts
+    // written before 01-scrape carried the full silver object are missing fields
+    // whose absence degrades the build silently rather than failing it.
+    if (scraped) {
+      const REQUIRED = ['pageInventory', 'doctors', 'navigation', 'migration'];
+      const absent = REQUIRED.filter(k => scraped[k] == null);
+      if (absent.length) {
+        console.warn('');
+        console.warn(`  🔴 01-scrape.json is missing: ${absent.join(', ')}`);
+        console.warn('     This artifact predates the full-silver format. Resuming from it');
+        console.warn('     produces a degraded site (starved content prompts, no team pages,');
+        console.warn('     fallback navigation, broken redirects). Re-run without --skip-scrape.');
+        console.warn('');
+        stats.confidenceFlags ||= [];
+        stats.confidenceFlags.push(`resume: 01-scrape.json missing ${absent.join('/')} — degraded`);
+      }
+    }
     console.log('');
   } else {
     console.log('[Phase 1] No URL provided — skipping crawl.');
@@ -475,9 +612,9 @@ async function main() {
   // library distillation, Airtable, GCS, and the auto-rescan lookup. Must
   // be at function scope so every downstream consumer (especially publish())
   // sees the same value. Falls back to scraped domain, then a constant.
-  const { slugFromUrl } = await import('./lib/slug.js');
   const slug = (opts.url && slugFromUrl(opts.url))
     || (merged.practice?.domain && slugFromUrl(`https://${merged.practice.domain}`))
+    || provisionalSlug
     || 'new-dental-site';
 
 
@@ -620,6 +757,9 @@ async function main() {
     try {
       const bronzeJson = JSON.stringify(bronze, null, 2);
       await runStorage.writeArtifact('01-bronze.json', bronzeJson, resolve(outputDir, '_pipeline', '01-bronze.json'));
+      if (bronze.coverage) {
+        await runStorage.writeArtifact('01-coverage.json', bronze.coverage, resolve(outputDir, '_pipeline', '01-coverage.json'));
+      }
       console.log(`  Bronze saved: ${bronze.pageCount} pages, ${(bronzeJson.length / 1024).toFixed(0)}KB`);
     } catch (err) {
       console.warn(`  Bronze save failed: ${err.message}`);
@@ -631,6 +771,7 @@ async function main() {
   // -----------------------------------------------------------------------
   let audit = null;
   if (!opts.skipAudit && scraped) {
+    heartbeat.setPhase('audit');
     console.log('[Phase 2b] Running AI site audit...');
     const auditStart = Date.now();
     audit = await runSiteAudit(scraped, merged, preset, { verbose: opts.verbose });
@@ -650,7 +791,7 @@ async function main() {
   // -----------------------------------------------------------------------
   // Phase 2b2: PageSpeed Insights — current site scores (non-AI, fast)
   // -----------------------------------------------------------------------
-  if (opts.url) {
+  if (opts.url && !opts.skipPagespeed) {
     console.log('[Phase 2b2] Running PageSpeed Insights on current site...');
     const psStart = Date.now();
     try {
@@ -663,6 +804,16 @@ async function main() {
     } catch (err) {
       console.warn(`  PageSpeed skipped: ${err.message}`);
     }
+    console.log('');
+  } else if (opts.skipPagespeed) {
+    console.log('[Phase 2b2] Skipping PageSpeed (--skip-pagespeed).');
+    // Overwrite rather than leave the previous run's artifact in place: a stale
+    // 03-pagespeed.json reads as current in the report and its old duration was
+    // being counted toward this run's timing ledger.
+    await artifacts.writeStep('03-pagespeed', {
+      input:  { url: opts.url },
+      output: { skipped: true, reason: '--skip-pagespeed' },
+    }, Date.now());
     console.log('');
   }
 
@@ -700,6 +851,7 @@ async function main() {
   let design = null;
   let brandDna = null;
   if (scraped && !opts.skipDesign && process.env.ANTHROPIC_API_KEY) {
+    heartbeat.setPhase('brand-dna');
     console.log('[Phase 2c/2d] Defining brand (brand-dna)...');
     const brandStart = Date.now();
     try {
@@ -739,24 +891,62 @@ async function main() {
   // path — consider porting validatePalette into applyBrandToMerged as a guard.
 
   // -----------------------------------------------------------------------
-  // Phase 2e: Content Map (audit / blueprint) — what each section needs and
-  // what existing source material best fits. Produces `_pipeline/03-content-blueprint.json`.
+  // Phase 2e + 2e-bis: Content Map and Architect, in parallel.
+  //
+  // Map audits section-level content quality; Architect decides the page set and
+  // the disposition of every source page. Neither reads the other's output —
+  // Map takes (scraped, merged, audit), Architect takes (bronze, merged) — so
+  // running them back to back was costing ~70s per build for nothing.
   // -----------------------------------------------------------------------
   let blueprint = null;
-  if (!opts.skipContent && scraped) {
-    console.log('[Phase 2e] Running Content Map (blueprint / audit)...');
-    const mapStart = Date.now();
-    blueprint = await runContentMap(scraped, merged, audit, preset, { verbose: opts.verbose });
+  let architecture = null;
+
+  const wantMap       = !opts.skipContent && scraped;
+  const wantArchitect = !opts.skipContent && bronze?.pages?.length;
+
+  if (wantMap || wantArchitect) {
+    heartbeat.setPhase('content-map');
+    const labels = [wantMap && 'Content Map', wantArchitect && 'Architect'].filter(Boolean);
+    console.log(`[Phase 2e] Running ${labels.join(' + ')}${labels.length > 1 ? ' (parallel)' : ''}...`);
+    const phaseStart = Date.now();
+
+    const [mapResult, archResult] = await Promise.all([
+      wantMap
+        ? runContentMap(scraped, merged, audit, preset, { verbose: opts.verbose })
+            .catch(err => { console.warn(`  Content Map failed: ${err.message}`); return null; })
+        : Promise.resolve(null),
+      wantArchitect
+        ? import('./lib/ai-architect.js')
+            .then(m => m.runArchitect(bronze, merged, preset, { verbose: opts.verbose })
+              .then(r => ({ result: r, print: m.printArchitectReport })))
+            .catch(err => { console.warn(`  Architect failed (non-fatal): ${err.message}`); return null; })
+        : Promise.resolve(null),
+    ]);
+
+    blueprint = mapResult;
     if (blueprint) {
       await artifacts.writeStep('03-content-blueprint', {
         input: { url: opts.url, preset: opts.preset },
         output: blueprint,
-      }, mapStart);
+      }, phaseStart);
       const cov = blueprint.coverage || {};
       console.log(`  Blueprint: ${cov.totalSections || '?'} sections — quality ${JSON.stringify(cov.byQuality || {})}, action ${JSON.stringify(cov.byAction || {})}`);
-    } else {
+    } else if (wantMap) {
       console.log('  Content Map skipped or failed — Write will run in legacy single-pass mode.');
     }
+
+    architecture = archResult?.result || null;
+    if (architecture) {
+      await artifacts.writeStep('03-architecture', {
+        input: { url: opts.url, preset: opts.preset },
+        output: architecture,
+      }, phaseStart);
+      archResult.print?.(architecture);
+    } else if (wantArchitect) {
+      console.log('  Architect skipped or failed — the ledger will not drive this build.');
+    }
+
+    console.log(`  (phase took ${((Date.now() - phaseStart) / 1000).toFixed(0)}s)`);
     console.log('');
   }
 
@@ -765,9 +955,20 @@ async function main() {
   // -----------------------------------------------------------------------
   let contentMap = null;
   if (!opts.skipContent && scraped) {
+    heartbeat.setPhase('content-write');
     console.log('[Phase 2f] Running Content Write...');
     const contentStart = Date.now();
-    contentMap = await runContentMapping(scraped, merged, audit, preset, { verbose: opts.verbose }, blueprint);
+    // strict: a blueprint exists, so never fall back to legacy single-pass mode —
+    // that path produces different, less grounded copy and used to engage silently.
+    contentMap = await runContentMapping(
+      scraped, merged, audit, preset,
+      // strict when Map was *expected* to run. Keying this off `Boolean(blueprint)`
+      // made the guard unreachable — it could only be true once a blueprint
+      // already existed, so `strict && !blueprint` never fired and a failed Map
+      // silently dropped Write into legacy single-pass mode instead.
+      { verbose: opts.verbose, strict: Boolean(wantMap) },
+      blueprint
+    );
     if (contentMap) {
       stats.hasContent = true;
       // Surface key generated fields into merged.content for injection
@@ -795,7 +996,18 @@ async function main() {
       }, contentStart);
       console.log('  Content artifact written.');
     } else {
-      console.log('  AI content mapping skipped or failed.');
+      // Every page's copy comes from this phase. Continuing without it ships a
+      // site built from raw scrape fallbacks that looks finished and isn't —
+      // the failure mode this pipeline exists to prevent. Flag it loudly and
+      // carry the flag into the artifacts an operator actually reads.
+      stats.contentWriteFailed = true;
+      stats.confidenceFlags ||= [];
+      stats.confidenceFlags.push('content-write: FAILED — site copy is raw-scrape fallback, not written copy');
+      console.warn('');
+      console.warn('  🔴 Content Write FAILED. The build will continue, but every page');
+      console.warn('     falls back to raw scraped text. Re-run before shipping:');
+      console.warn(`     node scripts/pipeline/build-site.js --url ${opts.url || '<url>'} --output <dir> --skip-scrape`);
+      console.warn('');
     }
     console.log('');
   } else if (opts.skipContent) {
@@ -803,38 +1015,18 @@ async function main() {
     console.log('');
   }
 
-  // Write deferred scrape artifact — full silver output including signals
+  // Write deferred scrape artifact — the FULL silver object.
+  //
+  // This file is not just a report: `--skip-scrape` reloads it as `scraped`
+  // (see loadArtifact above). It used to be a hand-curated subset, so a resumed
+  // run silently lost pageInventory (starving Content Map and Content Write),
+  // doctors/additionalDoctors (no team pages), navigation (nav fell back to the
+  // hardcoded list), and migration (no redirect map) — a materially worse site
+  // from the same inputs, with nothing reporting it. Serialize everything.
   if (scraped) {
     await artifacts.writeStep('01-scrape', {
       input: { url: opts.url },
-      output: {
-        practice: scraped.practice,
-        doctor: scraped.doctor ? { name: scraped.doctor.name, credentials: scraped.doctor.credentials } : null,
-        address: scraped.address,
-        hours: scraped.hours || null,
-        brand: scraped.brand || null,
-        services: { offered: scraped.services?.offered || [] },
-        images: {
-          logo:        scraped.images?.logo        || null,
-          hero:        scraped.images?.hero        || [],
-          team:        scraped.images?.team        || [],
-          office:      scraped.images?.office      || [],
-          gallery:     scraped.images?.gallery     || [],
-          beforeAfter: scraped.images?.beforeAfter || [],
-        },
-        content: {
-          heroTagline:     scraped.content?.heroTagline     || null,
-          heroSubheadline: scraped.content?.heroSubheadline || null,
-          testimonials:    scraped.content?.testimonials    || [],
-          faqs:            scraped.content?.faqs            || [],
-          insurance:       scraped.content?.insurance       || [],
-          stats:           scraped.content?.stats           || {},
-        },
-        signals: scraped.signals || [],
-        servicesDetected: scraped.services?.offered?.length || 0,
-        pagesVisited: scraped.migration?.oldUrls?.length || 0,
-        reviews: reviews || null,
-      },
+      output: { ...scraped, reviews: reviews || null },
       confidence: scraped.meta?.confidenceFlags || [],
     });
   }
@@ -866,6 +1058,7 @@ async function main() {
   let contentPlan = null;
   let binding = null;
   if (process.env.ANTHROPIC_API_KEY && brandDna) {
+    heartbeat.setPhase('director');
     console.log('[Phase 2e/2f] Plan content + assemble layout (clean path)...');
     try {
       // Faithful mimicry: place ALL the practice's content (reorganize/optimize,
@@ -901,47 +1094,159 @@ async function main() {
   // -----------------------------------------------------------------------
   // Phase 3: Inject template + generate pages + blog stubs + images
   // -----------------------------------------------------------------------
+  heartbeat.setPhase('inject');
   console.log('[Phase 3] Building project...');
   const buildStart = Date.now();
 
+  // Track what each generator writes so output it stops producing between runs
+  // gets removed rather than lingering as an orphan route.
+  const { openManifest } = await import('./lib/build-manifest.js');
+  const manifest = await openManifest(outputDir);
+
   // 3a — Copy starter template and inject practice data
   console.log('  Injecting template...');
-  await injectTemplate(merged, outputDir, preset, design);
+  await injectTemplate(merged, outputDir, preset, design, { architecture });
   console.log('  Template injected.');
 
   // 3a-bis — Write design DNA (after template clone)
   if (director) {
     await writeDesignDna(director.dna, outputDir);
-    await injectGlobalCss(director.dna, outputDir);
+    await injectGlobalCss(director.dna, outputDir, merged.brand?.colors);
     console.log(`  Global CSS injected (radius: ${director.dna.radius}, density: ${director.dna.density}).`);
     console.log('  Design DNA written to src/config/design-dna.ts');
   }
 
   // 3b — Generate individual service pages (one per scraped service)
   console.log('  Generating pages...');
-  const pageResult = await generatePages({ ...merged, bronze }, outputDir, preset, contentPlan);
+  // Which service routes will receive the practice's own page verbatim. Those
+  // pages should not also carry a written summary of the same text — the port
+  // plan is deterministic, so it can be computed before generation rather than
+  // discovered after.
+  let suppressIntroFor = null;
+  if (architecture?.ledger?.length) {
+    try {
+      const { buildPortPlan } = await import('./lib/page-port.js');
+      const plan = buildPortPlan(architecture, bronze?.pages || []);
+      suppressIntroFor = new Set(
+        [...plan.sections.keys()]
+          .filter(r => r.startsWith('/services/'))
+          .map(r => r.replace('/services/', ''))
+      );
+      if (suppressIntroFor.size) {
+        console.log(`  ${suppressIntroFor.size} service page(s) get the practice's own copy — written intro suppressed there.`);
+      }
+    } catch (err) {
+      console.warn(`  Could not pre-compute port plan (non-fatal): ${err.message}`);
+    }
+  }
 
-  // 3b-bis — Generate redirect file from migration map
+  const pageResult = await generatePages({ ...merged, bronze }, outputDir, preset, contentPlan, { suppressIntroFor });
+
+  // 3b-ter — Port pages the Architect ledger assigned a home.
+  // Everything the fixed template had no slot for — patient info, reviews,
+  // neighborhood pages, language variants — lands here, carried over verbatim.
+  let portResult = null;
+  if (architecture?.ledger?.length) {
+    try {
+      const { generatePortedPages } = await import('./lib/page-port.js');
+      portResult = await generatePortedPages(architecture, bronze, outputDir);
+      manifest.record('page-port', portResult.writtenFiles || []);
+      if (portResult.written.length) {
+        console.log(`  Ported ${portResult.written.length} page(s) from the ledger: ${portResult.written.join(', ')}`);
+      }
+      for (const a of portResult.appended) {
+        console.log(`  Absorbed ${a.sections} section(s) into ${a.target}`);
+      }
+      if (portResult.unresolved.length) {
+        console.warn(`  ${portResult.unresolved.length} ledger entr(ies) could not be placed:`);
+        for (const u of portResult.unresolved.slice(0, 5)) console.warn(`    ✗ ${u.source} — ${u.reason}`);
+      }
+    } catch (err) {
+      console.warn(`  Page porting failed (non-fatal): ${err.message}`);
+    }
+  }
+
+  // 3c — Migrate blog posts (verbatim) + generate stubs where there's no blog
+  console.log('  Generating blog posts...');
+  const blogResult = await generateBlogStubs({ ...merged, bronze }, outputDir, preset);
+  stats.blogStubs = blogResult?.count ?? blogResult ?? 0;
+  manifest.record('blog', blogResult?.writtenFiles || []);
+
+  // Remove last run's output that no generator produced this time — the case
+  // that let a renamed page (`/se-habla-espanol` → `/es`) stay live and pass
+  // the coverage audit as if it were current.
+  try {
+    const { removed, skippedGenerators } = await manifest.prune();
+    if (removed.length) {
+      console.log(`  Pruned ${removed.length} orphaned file(s) from a previous run: ${removed.slice(0, 5).join(', ')}${removed.length > 5 ? '…' : ''}`);
+    }
+    if (skippedGenerators.length) {
+      console.log(`  Left ${skippedGenerators.join(', ')} output in place (generator did not run this build).`);
+    }
+    await manifest.write();
+  } catch (err) {
+    console.warn(`  Build manifest failed (non-fatal): ${err.message}`);
+  }
+
+  // 3c-ante — Generate redirect file from migration map.
+  //
+  // Must run AFTER blog migration: migrated posts keep their original slug, so
+  // the migration map's 301 for `/blog/<slug>` would shadow the very page that
+  // now lives there. Anything the rebuild actually serves is dropped from the map.
   const redirectMap = merged?.migration?.redirectMap || [];
   if (redirectMap.length > 0) {
     try {
       const { writeFile: wf } = await import('node:fs/promises');
       const { resolve: res } = await import('node:path');
-      // Cloudflare Pages / Netlify _redirects format
-      const lines = redirectMap
+      const normPath = (p) => String(p || '').toLowerCase().replace(/\/+$/, '') || '/';
+      const nowServed = new Set((blogResult?.migratedPaths || []).map(normPath));
+
+      // The Architect ledger knows where every source page's content actually
+      // went, so it outranks the migration map — which only ever covered the
+      // URLs silver happened to collect, and defaulted the rest to `/`.
+      const ledgerTargets = new Map();
+      for (const entry of architecture?.ledger || []) {
+        if (!entry?.source || !entry.target) continue;
+        if (entry.disposition === 'drop') continue;
+        ledgerTargets.set(normPath(entry.source), entry.target);
+      }
+
+      // Blog index and pagination aren't in the ledger (posts are migrated, not
+      // architected), so without this they keep the migration map's default of
+      // `/` — sending an archive listing to the homepage.
+      const isBlogIndexish = (p) => /^\/(?:blog|news|articles?)(?:\/page\/\d+)?\/?$/i.test(p);
+
+      let reTargeted = 0;
+      const kept = redirectMap
         .filter(r => r.from && r.to)
+        .map(r => {
+          const better = ledgerTargets.get(normPath(r.from));
+          if (better && better !== r.to) { reTargeted++; return { ...r, to: better }; }
+          if (isBlogIndexish(normPath(r.from)) && r.to === '/') { reTargeted++; return { ...r, to: '/blog' }; }
+          return r;
+        });
+      // Ledger entries the migration map never knew about.
+      const known = new Set(kept.map(r => normPath(r.from)));
+      for (const [from, to] of ledgerTargets) {
+        if (!known.has(from) && from !== '/' && !nowServed.has(from)) kept.push({ from, to });
+      }
+      if (reTargeted > 0) console.log(`  Re-pointed ${reTargeted} redirect(s) using the Architect ledger.`);
+      const shadowing = kept.filter(r => nowServed.has(normPath(r.from)));
+      // Cloudflare Pages / Netlify _redirects format
+      const lines = kept
+        .filter(r => !nowServed.has(normPath(r.from)))
         .map(r => `${r.from}  ${r.to}  301`);
+
       await wf(res(outputDir, 'public', '_redirects'), lines.join('\n') + '\n', 'utf8');
       console.log(`  Wrote ${lines.length} redirect(s) to public/_redirects`);
+      if (shadowing.length > 0) {
+        console.log(`  Dropped ${shadowing.length} redirect(s) that would shadow a migrated page.`);
+      }
       stats.redirectCount = lines.length;
     } catch (err) {
       console.warn(`  Redirect file write failed (non-fatal): ${err.message}`);
     }
   }
-
-  // 3c — Generate blog stubs
-  console.log('  Generating blog stubs...');
-  stats.blogStubs = await generateBlogStubs({ ...merged, bronze }, outputDir, preset);
 
   // 3c-bis — Generate llms.txt + .well-known/webmcp.json for Lighthouse Agentic Browsing
   try {
@@ -1073,6 +1378,7 @@ async function main() {
   // overwrites the stub component files.
   // -----------------------------------------------------------------------
   if (!opts.skipGenerate && process.env.ANTHROPIC_API_KEY && director) {
+    heartbeat.setPhase('generate-sections');
     console.log('[Phase 3.5] Generating unique section components (atomic design)...');
     try {
       const { generateSections } = await import('./lib/generate-sections.js');
@@ -1156,6 +1462,7 @@ async function main() {
   // Phase 4: Validate build (unless --skip-build)
   // -----------------------------------------------------------------------
   if (!opts.skipBuild) {
+    heartbeat.setPhase('astro-build');
     console.log('[Phase 4] Validating build...');
     const validateStart = Date.now();
     const validation = await validate(outputDir);
@@ -1217,6 +1524,7 @@ async function main() {
     && !!process.env.ANTHROPIC_API_KEY;
 
   if (runAgent) {
+    heartbeat.setPhase('designer-agent');
     console.log('[Phase 4.5] Designer Agent loop starting...');
     const practice = {
       name:   merged?.practice?.name || '',
@@ -1569,7 +1877,7 @@ async function main() {
       outputDir,
       validationPayload,
       bronze?.imageAnalysis || null,
-      { includeAstroPage }
+      { includeAstroPage, contentWriteFailed: Boolean(stats.contentWriteFailed) }
     );
     stats.missingCritical = missingResult.summary.critical;
     stats.missingImportant = missingResult.summary.important;
@@ -1640,6 +1948,16 @@ async function main() {
     const ledger = getCostLedger();
     if (ledger.callCount > 0) {
       console.log(`  AI calls:     ${ledger.callCount} · ${ledger.totalInputTokens.toLocaleString()} in / ${ledger.totalOutputTokens.toLocaleString()} out tokens · $${ledger.totalCost.toFixed(2)} estimated`);
+      // A run that took hours longer than usual should say so here rather than
+      // leaving the elapsed time to be misread as a code regression.
+      if (ledger.networkLostSeconds > 0) {
+        const lost = ledger.networkLostSeconds;
+        console.log(`  Network:      ${Math.round(lost / 60)}m ${lost % 60}s lost to stalls/retries across ${ledger.retriedCalls} call(s)`);
+        if (lost > 120) {
+          stats.confidenceFlags ||= [];
+          stats.confidenceFlags.push(`network: ${Math.round(lost / 60)}m lost to stalls/retries — elapsed time is not representative`);
+        }
+      }
       // Top 3 most expensive phases
       const byPhase = new Map();
       for (const c of ledger.calls) {
@@ -1773,21 +2091,65 @@ async function main() {
 
   // Coverage audit: compare scraped/silver data → final rebuild and flag gaps
   // (missing doctors, thinned service pages, mismatched contact info, etc.)
+  //
+  // Two auditors run here and BOTH land in coverage-audit.json:
+  //   - content-coverage.js — bronze-vs-final category diff. Catches hard losses
+  //     (team pages, nav shrinking, whole informational pages vanishing).
+  //   - coverage-audit.js   — field-level signals on the rebuilt site.
+  // content-coverage findings used to go to a markdown file nobody gated on,
+  // so coverage-audit.json could report "no gaps detected ✓" while
+  // content-coverage.md listed critical losses on the same run.
   try {
-    const { runCoverageAudit } = await import('./lib/coverage-audit.js');
-    const audit = await runCoverageAudit(outputDir);
     const auditDir = resolve(outputDir, '_pipeline');
     const { writeFile: wf } = await import('node:fs/promises');
-    await wf(resolve(auditDir, 'coverage-audit.json'), JSON.stringify({ findings: audit.findings, summary: audit.summary }, null, 2));
+
+    let contentFindings = [];
+    try {
+      const { runContentCoverage } = await import('./lib/content-coverage.js');
+      const ccc = await runContentCoverage({ slug, outputDir });
+      contentFindings = ccc.findings || [];
+      if (ccc.summary.total > 0) {
+        console.log('');
+        console.log(`[Content Coverage Audit] ${ccc.summary.critical} critical · ${ccc.summary.warning} warning · ${ccc.summary.note} note`);
+        for (const f of contentFindings.filter(x => x.severity === 'CRITICAL')) {
+          console.log(`  🔴 ${f.message}`);
+        }
+        for (const f of contentFindings.filter(x => x.severity === 'WARNING')) {
+          console.log(`  🟡 ${f.message}`);
+        }
+        console.log(`  Full report: ${resolve(outputDir, '_pipeline/content-coverage.md')}`);
+      } else {
+        console.log('[Content Coverage Audit] No category losses detected ✓');
+      }
+    } catch (err) {
+      console.warn(`  Content coverage audit failed: ${err.message}`);
+    }
+
+    const { runCoverageAudit } = await import('./lib/coverage-audit.js');
+    const audit = await runCoverageAudit(outputDir);
+
+    // Union of both auditors — this is the artifact downstream gates read.
+    const findings = [
+      ...audit.findings,
+      ...contentFindings.map(f => ({ ...f, source: f.source || 'content-coverage' })),
+    ];
+    const summary = {
+      total:    findings.length,
+      critical: findings.filter(f => f.severity === 'CRITICAL').length,
+      warning:  findings.filter(f => f.severity === 'WARNING').length,
+      note:     findings.filter(f => f.severity === 'NOTE').length,
+    };
+
+    await wf(resolve(auditDir, 'coverage-audit.json'), JSON.stringify({ findings, summary }, null, 2));
     await wf(resolve(auditDir, 'coverage-audit.md'), audit.markdown);
-    if (audit.summary.total > 0) {
+    if (summary.total > 0) {
       console.log('');
-      console.log(`[Coverage Audit] ${audit.summary.critical} critical · ${audit.summary.warning} warning · ${audit.summary.note} note`);
+      console.log(`[Coverage Audit] ${summary.critical} critical · ${summary.warning} warning · ${summary.note} note (incl. content coverage)`);
       // Print critical findings inline so they don't get lost
-      for (const f of audit.findings.filter(x => x.severity === 'CRITICAL')) {
+      for (const f of findings.filter(x => x.severity === 'CRITICAL')) {
         console.log(`  🔴 ${f.check}: ${f.message}`);
       }
-      for (const f of audit.findings.filter(x => x.severity === 'WARNING').slice(0, 5)) {
+      for (const f of findings.filter(x => x.severity === 'WARNING').slice(0, 5)) {
         console.log(`  🟡 ${f.check}: ${f.message}`);
       }
       console.log(`  Full report: ${auditDir}/coverage-audit.md`);
@@ -1830,28 +2192,21 @@ async function main() {
     }
   }
 
-  // Content Coverage Audit: bronze-vs-final category-level diff. Catches
-  // hard losses (whole team pages, multi-doctor collapses, nav shrinking,
-  // informational pages vanishing) that coverage-audit.js's weaker signals
-  // can miss.
+  // Deterministic build verification. Every assertion here corresponds to a bug
+  // that shipped and was only caught by a full pipeline run — palette below AA,
+  // undefined colour tokens, redirects that shadow or dangle, blog frontmatter
+  // over the schema limit, placeholder routes. Runs in about a second.
   try {
-    const { runContentCoverage } = await import('./lib/content-coverage.js');
-    const ccc = await runContentCoverage({ slug, outputDir });
-    if (ccc.summary.total > 0) {
-      console.log('');
-      console.log(`[Content Coverage Audit] ${ccc.summary.critical} critical · ${ccc.summary.warning} warning · ${ccc.summary.note} note`);
-      for (const f of ccc.findings.filter(x => x.severity === 'CRITICAL')) {
-        console.log(`  🔴 ${f.message}`);
-      }
-      for (const f of ccc.findings.filter(x => x.severity === 'WARNING')) {
-        console.log(`  🟡 ${f.message}`);
-      }
-      console.log(`  Full report: ${resolve(outputDir, '_pipeline/content-coverage.md')}`);
-    } else {
-      console.log('[Content Coverage Audit] No category losses detected ✓');
-    }
+    const { execFileSync } = await import('node:child_process');
+    const script = resolve(pathDirname(pathFileURLToPath(import.meta.url)), 'verify-build.js');
+    const out = execFileSync(process.execPath, [script, outputDir], { encoding: 'utf8' });
+    console.log(out);
   } catch (err) {
-    console.warn(`  Content coverage audit failed: ${err.message}`);
+    // Non-zero exit means assertions failed — the output is the report.
+    if (err.stdout) console.log(err.stdout);
+    else console.warn(`  Build verification could not run: ${err.message}`);
+    stats.confidenceFlags ||= [];
+    stats.confidenceFlags.push('verify-build: assertions failed — see report above');
   }
 
   // Generate HTML reports — three views of the same data:
@@ -1881,6 +2236,7 @@ async function main() {
 
   // --publish: deploy site + pitch page
   if (opts.publish) {
+    heartbeat.setPhase('publish');
     try {
       const { publish } = await import('./lib/publish.js');
       await publish({
@@ -1894,6 +2250,7 @@ async function main() {
       console.warn(`[Publish] Failed: ${err.message}`);
     }
   }
+  stopHeartbeat();
 }
 
 // ---------------------------------------------------------------------------
