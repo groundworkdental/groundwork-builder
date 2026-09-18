@@ -314,9 +314,68 @@ export function pagesMatching(pages, patterns) {
 }
 
 /**
- * Render a page as a markdown block. `bodyChars` controls per-page bodyText
- * cap — pass Infinity for full body.
+ * Render a page as a markdown block. Prefer narrative sections (heading →
+ * content in document order) when bronze has them — that is the content
+ * reference for rebuild, not disconnected heading/paragraph lists.
  */
+export function formatNarrative(page, maxChars = 6000) {
+  if (!page?.sections?.length && !page?.contentBlocks?.length) return '';
+  const lines = [];
+  let used = 0;
+  const push = (line) => {
+    if (used >= maxChars) return false;
+    lines.push(line);
+    used += line.length;
+    return used < maxChars;
+  };
+
+  const sections = page.sections?.length
+    ? page.sections
+    : groupBlocksFallback(page.contentBlocks || []);
+
+  for (const sec of sections) {
+    if (used >= maxChars) break;
+    if (sec.heading) {
+      const h = `${'#'.repeat(Math.min(sec.heading.level || 2, 6))} ${sec.heading.text}`;
+      if (!push(h)) break;
+    }
+    for (const block of sec.blocks || []) {
+      if (used >= maxChars) break;
+      if (block.type === 'paragraph') {
+        if (!push(block.text.slice(0, 1000))) break;
+      } else if (block.type === 'list') {
+        for (const item of block.items || []) {
+          if (!push(`- ${item}`)) break;
+        }
+      } else if (block.type === 'table') {
+        for (const row of block.rows || []) {
+          if (!push(`| ${row.join(' | ')} |`)) break;
+        }
+      } else if (block.type === 'heading') {
+        const h = `${'#'.repeat(Math.min(block.level || 2, 6))} ${block.text}`;
+        if (!push(h)) break;
+      }
+    }
+    push('');
+  }
+  return lines.join('\n').trim();
+}
+
+function groupBlocksFallback(blocks) {
+  const sections = [];
+  let current = { heading: null, blocks: [] };
+  for (const block of blocks) {
+    if (block.type === 'heading') {
+      if (current.heading || current.blocks.length) sections.push(current);
+      current = { heading: block, blocks: [] };
+    } else {
+      current.blocks.push(block);
+    }
+  }
+  if (current.heading || current.blocks.length) sections.push(current);
+  return sections;
+}
+
 export function renderPage(page, { bodyChars = 4000, paragraphs = 20, images = 30, includeJsonLd = true } = {}) {
   const lines = [`## ${page.path}  ${page.title ? `(${page.title})` : ''}`];
   if (page.metaDescription) lines.push(`Meta: ${page.metaDescription}`);
@@ -324,14 +383,28 @@ export function renderPage(page, { bodyChars = 4000, paragraphs = 20, images = 3
     lines.push('Hero text:');
     for (const t of page.heroTexts.slice(0, 8)) lines.push(`  · ${t}`);
   }
-  if (page.headings?.length) {
-    lines.push('Headings:');
-    for (const h of page.headings.slice(0, 30)) lines.push(`  H${h.level}: ${h.text}`);
+
+  const narrativeBudget = bodyChars === Infinity ? 50000 : Math.max(bodyChars, 6000);
+  const narrative = formatNarrative(page, narrativeBudget);
+  if (narrative) {
+    lines.push('Content (narrative):');
+    lines.push(narrative);
+  } else {
+    // Legacy bronze without sections
+    if (page.headings?.length) {
+      lines.push('Headings:');
+      for (const h of page.headings.slice(0, 30)) lines.push(`  H${h.level}: ${h.text}`);
+    }
+    if (page.paragraphs?.length) {
+      lines.push('Paragraphs:');
+      for (const p of page.paragraphs.slice(0, paragraphs)) lines.push(`  · ${p.slice(0, 600)}`);
+    }
+    if (page.bodyText && bodyChars > 0) {
+      const body = bodyChars === Infinity ? page.bodyText : page.bodyText.slice(0, bodyChars);
+      lines.push(`Body: ${body}`);
+    }
   }
-  if (page.paragraphs?.length) {
-    lines.push('Paragraphs:');
-    for (const p of page.paragraphs.slice(0, paragraphs)) lines.push(`  · ${p.slice(0, 600)}`);
-  }
+
   if (page.images?.length) {
     lines.push('Images (src | alt):');
     for (const img of page.images.slice(0, images)) lines.push(`  ${img.src} | ${img.alt}`);
@@ -348,10 +421,6 @@ export function renderPage(page, { bodyChars = 4000, paragraphs = 20, images = 3
     for (const item of page.structuredData.slice(0, 4)) {
       lines.push('  ' + JSON.stringify(item).slice(0, 800));
     }
-  }
-  if (page.bodyText && bodyChars > 0) {
-    const body = bodyChars === Infinity ? page.bodyText : page.bodyText.slice(0, bodyChars);
-    lines.push(`Body: ${body}`);
   }
   return lines.join('\n');
 }
