@@ -207,7 +207,10 @@ async function triggerPreviewBuild({ slug, practiceUrl, contactEmail, contactNam
 /** HTTP handler for Studio / Cloudflare Pages Functions. */
 export async function handleAuditPreviewRequestHttp(request) {
   if (request.method === 'OPTIONS') {
-    return corsJson({ ok: true }, 204);
+    // 204 means "no content", so the response must not carry a body — the
+    // Response constructor throws on a body with this status, which surfaced
+    // as a 500 on every preflight. Preflight needs only the CORS headers.
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
   if (request.method !== 'POST') {
     return corsJson({ ok: false, errors: ['Method not allowed'] }, 405);
@@ -229,14 +232,15 @@ export async function handleAuditPreviewRequestHttp(request) {
   );
 }
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
 function corsJson(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
   });
 }
