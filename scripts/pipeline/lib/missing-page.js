@@ -11,6 +11,7 @@
 
 import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { evaluateDataFields } from '../standards/practice-contract.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -36,7 +37,7 @@ import { resolve } from 'node:path';
  *   operator's view; the deployed site does not expose internal debug routes.
  */
 export async function generateMissingPage(merged, outputDir, validation = null, imageRoles = null, opts = {}) {
-  const missing = analyzeMissing(merged, validation, imageRoles);
+  const missing = analyzeMissing(merged, validation, imageRoles, opts);
   const pipelineDir = resolve(outputDir, '_pipeline');
   await mkdir(pipelineDir, { recursive: true });
 
@@ -83,7 +84,7 @@ export async function generateMissingPage(merged, outputDir, validation = null, 
 // Analyzer — builds the structured missing items report
 // ---------------------------------------------------------------------------
 
-function analyzeMissing(merged, validation, imageRoles = null) {
+function analyzeMissing(merged, validation, imageRoles = null, opts = {}) {
   const practice = merged.practice || {};
   const doctor = merged.doctor || {};
   const address = merged.address || {};
@@ -105,43 +106,37 @@ function analyzeMissing(merged, validation, imageRoles = null) {
     a11yIssues: [],         // Accessibility audit findings (axe-core)
   };
 
-  // ── Critical: Business Info ──────────────────────────────────────────────
-  if (!practice.phone) items.critical.push({ category: 'Business Info', field: 'Phone number', hint: 'The main practice phone number (e.g. (555) 123-4567)' });
-  if (!address.street) items.critical.push({ category: 'Business Info', field: 'Street address', hint: 'Full street address for the practice' });
-  if (!address.city) items.critical.push({ category: 'Business Info', field: 'City', hint: 'City the practice is located in' });
-  if (!address.zip) items.critical.push({ category: 'Business Info', field: 'ZIP code', hint: 'Practice ZIP / postal code' });
-  if (!practice.name) items.critical.push({ category: 'Business Info', field: 'Practice name', hint: 'Official business name as it should appear on the site' });
-
-  // ── Critical: Doctor Info ────────────────────────────────────────────────
-  if (!doctor.name && !doctor.firstName) items.critical.push({ category: 'Doctor Info', field: 'Doctor name', hint: 'Full name and credentials (e.g. Dr. Jane Smith, DDS)' });
-
-  // ── Critical: Branding ───────────────────────────────────────────────────
-  if (!images.logo) items.critical.push({ category: 'Branding', field: 'Practice logo', hint: 'PNG or SVG logo file, ideally with transparent background. Place at public/images/branding/logo.png' });
-
-  // ── Critical: Images ─────────────────────────────────────────────────────
-  if (!images.team || images.team.length === 0) {
-    items.critical.push({ category: 'Photos', field: 'Doctor / team photo(s)', hint: 'Professional headshot of the doctor and any key staff. Place at public/images/team/' });
+  // ── Critical: the copy itself ────────────────────────────────────────────
+  // A build that lost Content Write still renders — it just renders raw scrape
+  // fallbacks. That looks finished, so it has to be stated outright.
+  if (opts.contentWriteFailed) {
+    items.critical.push({
+      category: 'Content',
+      field: 'Written copy (Content Write failed)',
+      hint: 'Content Write did not complete, so page copy is raw scraped text rather than written copy. Re-run the pipeline with --skip-scrape to regenerate before shipping.',
+    });
   }
 
-  // ── Important: Business Info ─────────────────────────────────────────────
-  if (!practice.email) items.important.push({ category: 'Business Info', field: 'Practice email', hint: 'Contact email address shown on the site' });
-  if (!practice.googleReviewLink) items.important.push({ category: 'Business Info', field: 'Google review link', hint: 'Direct link to your Google Business Profile review page' });
-
-  // Check hours — default hours are set so we just flag if they look like placeholders
-  const hasRealHours = hours?.display && hours.display.some(h => h.time !== '9am – 5pm');
-  if (!hasRealHours) items.important.push({ category: 'Business Info', field: 'Office hours', hint: 'Real opening hours — the defaults (Mon–Fri 9–5) are currently set. Update in src/config/site.ts' });
-
-  // ── Important: Doctor Info ────────────────────────────────────────────────
-  if (!doctor.bio) items.important.push({ category: 'Doctor Info', field: 'Doctor bio', hint: '2-4 paragraph bio covering training, experience, philosophy, and personal touches. Goes on the About page.' });
-  if (!doctor.credentials) items.important.push({ category: 'Doctor Info', field: 'Doctor credentials', hint: 'Professional degree and any specialties (e.g. DDS, MD, FAGD)' });
-  if (!doctor.education) items.important.push({ category: 'Doctor Info', field: 'Doctor education', hint: 'Training, school, and any residency / continuing education highlights' });
+  // ── Contract-driven field presence ───────────────────────────────────────
+  // The list of fields, their severities and their hints live in
+  // standards/practice-contract.js — the same declaration the pre-build
+  // readiness gate and the onboarding checklist read. This used to be a
+  // parallel hand-written list, which is how the intake form came to ask
+  // for a booking URL that nothing checked for. Bespoke checks that are
+  // about more than presence (stock photography, build validation, hero
+  // imagery, deployment wiring) stay below.
+  const contract = evaluateDataFields(merged);
+  for (const field of contract.missing) {
+    items[field.severity].push({
+      category: field.category,
+      field: field.label,
+      hint: field.hint,
+    });
+  }
 
   // ── Important: Photos ────────────────────────────────────────────────────
-  if (!images.office || images.office.length === 0) {
-    items.important.push({ category: 'Photos', field: 'Office / interior photos', hint: 'Photos of the reception, treatment rooms, waiting area. Place at public/images/office/' });
-  }
-
-  const heroImages = []; // placeholder check
+  // Always emitted: a hero is a design requirement rather than a data field,
+  // so there is nothing in the merged data to test for its absence.
   items.important.push({ category: 'Photos', field: 'Hero / banner image', hint: 'A wide, high-quality photo for the homepage hero section. Place at public/images/heroes/hero-home.jpg' });
 
   // ── Important: Content ────────────────────────────────────────────────────
@@ -150,19 +145,15 @@ function analyzeMissing(merged, validation, imageRoles = null) {
   }
 
   // ── Optional ─────────────────────────────────────────────────────────────
-  if (!content.testimonials || content.testimonials.length === 0) {
-    items.optional.push({ category: 'Social Proof', field: 'Patient testimonials', hint: '3-5 real patient reviews. Can be pulled from Google Reviews.' });
-  }
+  // Testimonials, gallery, social profiles and insurance now come from the
+  // contract above. What remains here is stats the contract does not model
+  // (they are derived, not collected) and the deployment wiring.
   if (!content.stats?.yearsExperience) {
     items.optional.push({ category: 'Social Proof', field: 'Years in practice', hint: 'How many years has the practice been open? Used in the stats bar on the homepage.' });
   }
   if (!content.stats?.googleRating) {
     items.optional.push({ category: 'Social Proof', field: 'Google rating', hint: 'Current Google star rating (e.g. 4.9). Used in social proof section.' });
   }
-  if (!images.gallery || images.gallery.length === 0) {
-    items.optional.push({ category: 'Photos', field: 'Before & after gallery', hint: 'Treatment result photos for the gallery page. Place at public/images/gallery/' });
-  }
-
   // ── Stock image detection (from bronze.imageAnalysis — subject: 'stock') ──
   if (imageRoles && typeof imageRoles === 'object') {
     const stockEntries = Object.entries(imageRoles)
@@ -179,15 +170,9 @@ function analyzeMissing(merged, validation, imageRoles = null) {
       });
     }
   }
-  if (!practice.sameAs || practice.sameAs.length === 0) {
-    items.optional.push({ category: 'Social / Local', field: 'Social media profiles', hint: 'Facebook, Instagram, or other social profile URLs for footer links' });
-  }
-  if (!content.insurance || content.insurance.length === 0) {
-    items.optional.push({ category: 'Insurance', field: 'Insurance accepted', hint: 'List of insurance plans accepted, if applicable. Shown on the homepage and financing page.' });
-  }
-
-  // Domain & deployment
-  items.optional.push({ category: 'Deployment', field: 'Domain name', hint: 'The final production domain. Update in astro.config.mjs and .github/workflows/deploy.yml' });
+  // Deployment wiring. The domain itself is a contract field (Business Info)
+  // rather than a deployment item — it is something the practice tells us,
+  // not something we configure — so it is not repeated here.
   items.optional.push({ category: 'Deployment', field: 'Google Analytics ID', hint: 'GA4 Measurement ID (G-XXXXXXXXXX). Add to .env as PUBLIC_GA4_MEASUREMENT_ID' });
   items.optional.push({ category: 'Deployment', field: 'Cloudflare Pages project', hint: 'Set up Cloudflare Pages project and add CLOUDFLARE_API_TOKEN + project name to GitHub secrets' });
 
