@@ -46,90 +46,132 @@ Everything below feeds `intake.json`. Send as a form or Google Doc; fill it in y
 
 Template: [`docs/onboarding/intake-template.json`](./intake-template.json)
 
-### Practice basics
+<!-- BEGIN GENERATED: practice-contract -->
 
-| What | Notes |
-|------|-------|
-| **Legal / trading name** | Exactly as it appears on their GBP and signage |
-| **Phone number** | Main patient-facing line |
-| **Email** | Public patient-facing email |
-| **Website domain** | Current domain they want to keep |
-| **Street address** | Full address with suite |
-| **City, state, ZIP** | |
-| **Office hours** | All days, including "closed" days |
+#### What to collect from the practice
 
-### Doctor / team
+Generated from `scripts/pipeline/standards/practice-contract.js` — do not edit by hand.
+Everything here feeds `intake.json`. Run `check-readiness.js` against it before building.
 
-| What | Notes |
-|------|-------|
-| **Doctor first + last name** | |
-| **Credentials** | DDS, DMD, MS, etc. |
-| **Short bio** | 2–4 sentences; what they want patients to know |
-| **Education / residency** | School, program, year (only what's true) |
-| **Headshot photo** | High-res JPG or PNG; not a selfie |
-| **Healthgrades profile URL** | For sameAs schema (entity authority) |
-| **LinkedIn URL** | Optional but adds entity signal |
-| **Zocdoc / Vitals URLs** | If they have them |
+**Business Info**
 
-### Services
+| | Field | Intake key | What to ask for |
+|---|---|---|---|
+| **must** | Practice name | `practice_info.practice_name` | Official business name exactly as it should appear on the site and in Google. |
+| **must** | Phone number | `practice_info.contact_phone` | The number the front desk actually answers — not a personal cell, not a tracking line. |
+| **must** | Street address | `practice_info.address.street` | Street address including suite number. Must match Google Business Profile exactly. |
+| **must** | City | `practice_info.address.city` | City, matching the Google Business Profile listing. |
+| **must** | ZIP code | `practice_info.address.zip` | Postal code, matching the Google Business Profile listing. |
+| should | State | `practice_info.address.state` | Two-letter state code. |
+| should | Practice email | `practice_info.contact_email` | Monitored inbox for web enquiries. Form submissions and the mailto: link both go here. |
+| should | Office hours | `practice_info.hours` | Real opening hours per day, including any half-days and lunch closures. |
+| should | Domain name | `practice_info.domain` | The production domain. Confirm who the registrar is and who can log in. |
 
-| What | Notes |
-|------|-------|
-| **List of services offered** | One per line; these become service pages |
-| **Primary / flagship service** | The one they most want to rank for |
-| **Services they do NOT offer** | To avoid the pipeline pulling them from scrape |
+**Doctor Info**
 
-### Brand
+| | Field | Intake key | What to ask for |
+|---|---|---|---|
+| **must** | Doctor name | `doctor_team.primary_doctor.last_name` | Full name as patients know it, plus credentials (e.g. Dr. Jane Smith, DDS). |
+| should | Doctor bio | `doctor_team.primary_doctor.bio` | 2–4 paragraphs: training, experience, philosophy, and something human. Goes on About. |
+| should | Doctor credentials | `doctor_team.primary_doctor.credentials` | Degree and any specialties (DDS, DMD, FAGD). Defaults to DDS if unset — confirm it. |
+| should | Doctor education | `doctor_team.primary_doctor.education` | Dental school, residency, notable continuing education. |
 
-| What | Notes |
-|------|-------|
-| **Logo file** | SVG preferred; PNG acceptable (transparent background) |
-| **Primary color** | Hex code, or "match our existing site" |
-| **Secondary / accent color** | If known |
-| **Font preference** | Or "use your judgment" |
+**Photos**
 
-### Photos
+| | Field | Intake key | What to ask for |
+|---|---|---|---|
+| **must** | Practice logo | `branding.logo` | PNG or SVG, transparent background, highest resolution they have. |
+| **must** | Doctor / team photos | _from crawl_ | Headshots of the doctor and key staff. Consistent crop across the set. |
+| should | Office / interior photos | _from crawl_ | Reception, treatment rooms, waiting area. Real photos — no stock. |
+| nice | Before & after gallery | _from crawl_ | Treatment results. Each image needs documented provenance and consent. |
 
-| What | Notes |
-|------|-------|
-| **Exterior photo** | Storefront / building |
-| **Waiting room** | |
-| **Treatment room(s)** | |
-| **Team photo** | |
-| **Before / after cases** | Only with patient consent; optional |
+**Services**
 
-### Content
+| | Field | Intake key | What to ask for |
+|---|---|---|---|
+| **must** | Services offered | `services.list` | What they do — and, just as important, what they explicitly do NOT do. |
 
-| What | Notes |
-|------|-------|
-| **Patient FAQs** | Real questions they hear; 5–10 is ideal |
-| **Testimonials** | Real patient quotes (attribution optional) |
-| **Insurance plans accepted** | List; "PPO only", "Delta Dental", etc. |
-| **Financing options** | CareCredit, in-house plans, etc. |
-| **Scheduling software** | Dentrix, NexHealth, Zocdoc, etc. (for booking button link) |
-| **Case study consent** | yes / no / pending |
+**Conversion**
 
-### Accounts and access needed
+| | Field | Intake key | What to ask for |
+|---|---|---|---|
+| should | Booking URL | `content.scheduling_url` | Their scheduling software link (Dentrix, Zocdoc, NexHealth). Drives the primary CTA. |
+| should | Google review link | _from crawl_ | Direct review shortlink (g.page/r/…/review). Also becomes the in-office QR code. |
 
-These are permissions, not passwords. You never need their Google password.
+**Content**
 
-| What | How you get it | Why |
-|------|----------------|-----|
-| **GBP owner access** | They add you as Manager during setup call | CLI tools for reviews, posts; profile completion |
-| **Google Cloud project** (Client ID + Secret) | They create it on the call; you paste into `.env` | GBP API auth |
-| **Domain registrar login** | They share (or their IT does) | DNS cutover at go-live |
-| **DNS access** | Cloudflare, GoDaddy, Namecheap, etc. | Point domain to new hosting |
-| **Current hosting** | Read-only is fine | Understand what's there; not required to build |
-| **Google Analytics (existing)** | They add you as Editor | Transfer property or link to new one |
-| **Google Search Console (existing)** | They add you as Owner | Submit sitemap, request indexing, verify coverage |
-| **Social profile URLs** | They provide | Populate `sameAs` in LocalBusiness schema |
+| | Field | Intake key | What to ask for |
+|---|---|---|---|
+| nice | FAQs | `content.faqs` | Questions the front desk answers daily. These become FAQPage schema. |
 
-Social URLs to collect:
-- [ ] Facebook page URL
-- [ ] Instagram profile URL
-- [ ] Yelp listing URL
-- [ ] Healthgrades listing URL
-- [ ] Google Maps listing URL (share from Maps)
+**Social Proof**
+
+| | Field | Intake key | What to ask for |
+|---|---|---|---|
+| nice | Patient testimonials | `content.testimonials` | 3–5 real reviews, copied from Google at intake. |
+
+**Insurance**
+
+| | Field | Intake key | What to ask for |
+|---|---|---|---|
+| nice | Insurance accepted | `insurance_financing.plans` | Plans accepted. "We are in-network with…" is what patients search for. |
+| nice | Financing options | `insurance_financing.financing` | CareCredit, in-house membership plans, payment arrangements. |
+
+**Social / Local**
+
+| | Field | Intake key | What to ask for |
+|---|---|---|---|
+| nice | Social profiles | `content.social` | Facebook, Instagram, Yelp, Healthgrades URLs. Become schema sameAs and footer links. |
+
+**Branding**
+
+| | Field | Intake key | What to ask for |
+|---|---|---|---|
+| nice | Brand colors | `branding.colors` | Hex values if they have them. Defaults are applied silently otherwise. |
+
+Severity: 
+- **critical** — Must have — the site cannot launch without it.
+- **important** — Needed before a client launch; a cold preview can ship without it.
+- **optional** — Better with it; correct without it.
+
+#### Accounts and access
+
+Permissions, not passwords — you never need their Google password.
+
+**Cold build — Groundwork credentials only, no client contact**
+
+| Service | What | Whose account | Automatable | Notes |
+|---|---|---|---|---|
+| Anthropic | API key | groundwork | yes | Drives every AI step — silver extraction, copy, design critique, audits. |
+| Google Places | API key | groundwork | yes | Read-only, needs no client consent. Sourcing, review scraping, GBP scan. Distinct from GBP OAuth. |
+| PageSpeed Insights | API key | groundwork | yes | Optional — scores degrade to "not measured" without it. |
+| Cloudflare | Pages + D1 (Groundwork account) | groundwork | yes | Preview hosting and the ops CRM. Use a USER token, never an Account token. Store at ~/.config/groundwork/cloudflare.env (chmod 600), never in a repo. See `References/launch-operations.md §12`. |
+| GitHub | Repo under Groundwork | groundwork | yes | Client repo stays Groundwork-owned through the preview. |
+| Google Cloud Storage | Service account | groundwork | yes | Sourcing screenshots and run artifacts. Key file on disk at chmod 600 — never inline in .env. |
+
+**After the $500 deposit — moving to their infrastructure**
+
+| Service | What | Whose account | Automatable | Notes |
+|---|---|---|---|---|
+| Domain registrar | Who holds the login | client | **no — by hand** | Discover at kickoff. The answer is often "our old web guy", which is itself the finding. See `References/launch-operations.md`. |
+| DNS / Cloudflare zone | Which account owns the zone | client | **no — by hand** | Frequently the client's MSP, not the client. Verify with audit-client-zone.js. Batch every DNS ask into one request rather than negotiating a token. |
+| Cloudflare | Pages project in client account | client | **no — by hand** | After the $500 deposit the site moves to their Cloudflare. Confirm via the Custom Domains tab which project truly serves the domain. |
+| Cloudflare Turnstile | Per-client keys | groundwork | yes | Form spam protection. Keys are per-site. |
+
+**After full payment — ownership transfer**
+
+| Service | What | Whose account | Automatable | Notes |
+|---|---|---|---|---|
+| Google Business Profile | OAuth + Manager access | client | **no — by hand** | Practice owns the Cloud project and stays listing Owner; Groundwork is Manager. Scripted two-part screen-share. START THE API REQUEST EARLY — it is the longest pole in any launch. ⏱ _days to weeks — Google must approve the API access request._ See `docs/gbp/gbp-setup-walkthrough.md`. |
+| GA4 | Property in the client's Google account | client | **no — by hand** | Create INSIDE the practice's own Google account — never a Groundwork account, or handoff becomes a migration. Add the practice as account-level Administrator at creation, not at handoff. Account creation is console-only. See `References/launch-operations.md §3`. |
+| Search Console | Domain property + DNS TXT verification | client | **no — by hand** | Use a Domain property (covers apex + www). Practice is Owner. Verification is a manual DNS TXT handshake; sitemap submission is held until full payment. ⏱ _blocked on a DNS change by whoever holds the zone._ |
+| GitHub | Client repo access | client | **no — by hand** | Redeploy fresh into client-owned infrastructure rather than transferring. Collaborator invite withheld until paid in full. |
+
+> **Start these at kickoff, not at launch.** They are blocked on someone else's calendar:
+> - **Google Business Profile** — days to weeks — Google must approve the API access request
+> - **Search Console** — blocked on a DNS change by whoever holds the zone
+
+<!-- END GENERATED: practice-contract -->
 
 ---
 
