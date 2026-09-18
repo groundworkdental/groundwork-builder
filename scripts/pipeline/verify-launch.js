@@ -33,6 +33,12 @@
  *                       its siblings is glaring in a team grid, and a
  *                       thumbnail that disagrees with its parent makes
  *                       responsive <picture> swaps jump.
+ *   dead asset refs     BaseLayout defaulted og:image to a file the pipeline
+ *                       never generated. It 404'd in production, so every
+ *                       social share and link preview of the site was broken
+ *                       — silently, because nothing validates an og: URL.
+ *   truncated meta      descriptions cut mid-word by a hard slice, which is
+ *                       what a searcher reads in the result.
  *
  * The through-line: an unset value renders as broken output rather than as
  * absent output. Templates must guard, and this catches them when they don't.
@@ -403,6 +409,93 @@ async function checkImageSets(clientDir) {
 }
 
 
+
+/**
+ * Every local asset a page points at must exist in the output.
+ *
+ * og:image is the dangerous one: nothing validates it, no page looks broken,
+ * and the failure is only visible when someone shares a link. One site
+ * shipped with every social preview broken because the layout defaulted to a
+ * conventional filename the pipeline never generated.
+ *
+ * Checks src, href, og:image and schema image. Skips absolute URLs and data
+ * URIs — those are somebody else's to serve.
+ */
+async function checkAssetReferences(distDir, pages) {
+  const { access: acc } = await import('node:fs/promises');
+  const exists = (p) => acc(p).then(() => true).catch(() => false);
+
+  const missing = new Map();
+  const seen = new Set();
+
+  for (const [route, html] of pages) {
+    const refs = new Set();
+
+    for (const m of html.matchAll(/(?:src|href)="(\/[^"#?]+)"/g)) refs.add(m[1]);
+    for (const m of html.matchAll(/property="og:image"[^>]*content="([^"]+)"/g)) refs.add(m[1]);
+    for (const m of html.matchAll(/content="([^"]+)"[^>]*property="og:image"/g)) refs.add(m[1]);
+    // schema.org image values, which are often absolute URLs on our own host
+    for (const m of html.matchAll(/"image"\s*:\s*"([^"]+)"/g)) refs.add(m[1]);
+
+    for (let ref of refs) {
+      // Absolute URLs on our own site still resolve to a file in dist.
+      if (/^https?:\/\//i.test(ref)) {
+        try { ref = new URL(ref).pathname; } catch { continue; }
+      }
+      if (!ref.startsWith('/') || ref.startsWith('//')) continue;
+      if (ref.startsWith('/_') || ref === '/') continue;
+
+      const key = ref;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const clean = decodeURIComponent(ref.split('?')[0].split('#')[0]);
+      // A route renders as a directory index; an asset is a plain file.
+      const candidates = [
+        join(distDir, clean),
+        join(distDir, clean, 'index.html'),
+        join(distDir, `${clean}.html`),
+      ];
+      const found = (await Promise.all(candidates.map(exists))).some(Boolean);
+      if (!found) missing.set(clean, (missing.get(clean) || 0) + 1);
+    }
+  }
+
+  if (missing.size) {
+    const list = [...missing.keys()].slice(0, 6).join(', ');
+    fail(
+      'asset references',
+      `${missing.size} reference(s) point at files not in the build: ${list}` +
+        `${missing.size > 6 ? ' …' : ''}`,
+    );
+    return;
+  }
+  pass('asset references', `${seen.size} local reference(s) all resolve`);
+}
+
+/**
+ * Meta descriptions are what a searcher actually reads, so a hard slice that
+ * ends mid-word is visible in the result. Google truncates around 160
+ * characters anyway; anything longer is written for nobody.
+ */
+function checkMetaDescriptions(pages) {
+  const problems = [];
+  for (const [route, html] of pages) {
+    const m = /<meta\s+name="description"\s+content="([^"]*)"/i.exec(html)
+      || /<meta\s+content="([^"]*)"\s+name="description"/i.exec(html);
+    if (!m) { problems.push(`${route}: none`); continue; }
+    const desc = m[1].trim();
+    if (!desc) { problems.push(`${route}: empty`); continue; }
+    if (desc.length > 160) problems.push(`${route}: ${desc.length} chars`);
+    // A slice that landed mid-word, rather than a deliberate ellipsis.
+    if (/[A-Za-z]{2}(\.\.\.|…)$/.test(desc)) problems.push(`${route}: cut mid-word`);
+  }
+  problems.length
+    ? warn('meta descriptions', `${problems.length}: ${problems.slice(0, 4).join('; ')}`)
+    : pass('meta descriptions', `${pages.length} page(s) within 160 chars`);
+}
+
+
 /**
  * A built 404.html is what makes Pages answer 404 at all.
  *
@@ -456,6 +549,8 @@ async function main() {
   checkEmptyHrefs(pages);
   checkPlaceholders(pages, robotsTxt);
   await checkSitemapVsRedirects(distDir, pages);
+  await checkAssetReferences(distDir, pages);
+  checkMetaDescriptions(pages);
   await check404(distDir);
   await checkWorkingTree(clientDir);
   await checkImageSets(clientDir);
