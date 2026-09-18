@@ -17,13 +17,24 @@ const realPhoneDigits = '5551234567';
 const trackingPhone = import.meta.env.PUBLIC_DISPLAY_PHONE || '';
 const trackingDigits = trackingPhone.replace(/\D/g, '');
 
+/**
+ * E.164 is the form structured-data parsers expect: +<country><digits>, no
+ * punctuation. Schema must use this. `tel:` hrefs use bare digits, and only
+ * the display string carries parens and spaces — interpolating the display
+ * string into an href or into schema is the bug this separation prevents.
+ */
+const toE164 = (digits: string, country = '1') =>
+  digits ? `+${digits.length > 10 ? '' : country}${digits}` : '';
+
 export const site = {
   name: '[PRACTICE_NAME]',
   url: 'https://[DOMAIN]',
   phone: realPhone,
   phoneDigits: realPhoneDigits,
+  phoneE164: toE164(realPhoneDigits),
   displayPhone: trackingPhone || realPhone,
   displayPhoneDigits: trackingDigits || realPhoneDigits,
+  displayPhoneE164: toE164(trackingDigits || realPhoneDigits),
   email: 'info@[DOMAIN]',
   googleReviewLink: 'https://g.page/r/[YOUR_GOOGLE_REVIEW_ID]/review',
   googleProfileLink: 'https://g.page/r/[YOUR_GOOGLE_PROFILE_ID]',
@@ -80,7 +91,9 @@ export const localBusinessSchema = {
   '@type': 'Dentist',
   'name': site.name,
   'url': site.url,
-  'telephone': site.phone,
+  // E.164, not the display string — parsers expect +15551234567, and a
+  // parenthesised number is silently treated as unparseable by some.
+  'telephone': site.phoneE164,
   'address': {
     '@type': 'PostalAddress',
     'streetAddress': address.street,

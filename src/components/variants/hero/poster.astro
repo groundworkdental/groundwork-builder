@@ -67,7 +67,7 @@ const phone = content.phone || site.phone;
           )}
           {phone && (
             <a
-              href={`tel:${phone}`}
+              href={`tel:${phone.replace(/\D/g, '')}`}
               class="inline-flex items-center gap-2 text-neutral-mid hover:text-brand-primary transition-colors font-sans text-sm tabular-nums self-center"
               aria-label={`Call us at ${phone}`}
             >
@@ -86,7 +86,7 @@ const phone = content.phone || site.phone;
     <div class={`flex flex-col justify-center min-h-[85vh] bg-brand-primary ${t.spacingClass} px-8 md:px-12`}>
       <div class="max-w-2xl">
         {content.eyebrow && (
-          <span class="block text-sm font-semibold uppercase tracking-widest text-white/70 mb-3">
+          <span class="block text-sm font-semibold uppercase tracking-widest text-white/90 mb-3">
             {content.eyebrow}
           </span>
         )}

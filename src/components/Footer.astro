@@ -20,12 +20,12 @@ const variant = designDNA.footerVariant;
           <div class="text-white/60 text-sm mt-1">{addr.city}, {addr.state}</div>
         </div>
         <a
-          href={`tel:${phone.replace(/\D/g, '')}`}
+          href={`tel:${phone.replace(/\D/g, '')}`} data-phone-location="footer"
           class="font-serif text-2xl md:text-3xl font-bold text-white hover:text-brand-primary transition-colors"
         >
           {phone}
         </a>
-        <a href="/schedule" class="btn-primary text-sm px-6 py-3 whitespace-nowrap">
+        <a href="/schedule" data-schedule-location="footer" class="btn-primary text-sm px-6 py-3 whitespace-nowrap">
           Book Appointment
         </a>
       </div>
@@ -47,12 +47,12 @@ const variant = designDNA.footerVariant;
             <p>{addr.street}</p>
             <p>{addr.city}, {addr.state} {addr.zip}</p>
             <p class="pt-2">
-              <a href={`tel:${phone.replace(/\D/g, '')}`} class="hover:text-neutral-dark transition-colors font-medium">
+              <a href={`tel:${phone.replace(/\D/g, '')}`} data-phone-location="footer" class="hover:text-neutral-dark transition-colors font-medium">
                 {phone}
               </a>
             </p>
             <p>
-              <a href={`mailto:${email}`} class="hover:text-neutral-dark transition-colors">
+              <a href={`mailto:${email}`} data-email-location="footer" class="hover:text-neutral-dark transition-colors">
                 {email}
               </a>
             </p>
@@ -95,7 +95,7 @@ const variant = designDNA.footerVariant;
             <div>
               <h3 class="text-xs font-semibold uppercase tracking-widest text-neutral-dark mb-4">Quick Links</h3>
               <ul class="space-y-2 text-sm text-neutral-mid">
-                <li><a href="/schedule" class="font-medium text-neutral-dark hover:text-brand-primary transition-colors">&rarr; Book Appointment</a></li>
+                <li><a href="/schedule" data-schedule-location="footer" class="font-medium text-neutral-dark hover:text-brand-primary transition-colors">&rarr; Book Appointment</a></li>
                 <li><a href="/about" class="hover:text-neutral-dark transition-colors">About Us</a></li>
                 <li><a href="/blog" class="hover:text-neutral-dark transition-colors">Patient Blog</a></li>
                 <li><a href="/faq" class="hover:text-neutral-dark transition-colors">FAQ</a></li>
@@ -127,12 +127,12 @@ const variant = designDNA.footerVariant;
             </div>
             <div class="mt-3 space-y-1">
               <p>
-                <a href={`tel:${phone.replace(/\D/g, '')}`} class="hover:text-neutral-dark transition-colors font-medium">
+                <a href={`tel:${phone.replace(/\D/g, '')}`} data-phone-location="footer" class="hover:text-neutral-dark transition-colors font-medium">
                   {phone}
                 </a>
               </p>
               <p>
-                <a href={`mailto:${email}`} class="hover:text-neutral-dark transition-colors">
+                <a href={`mailto:${email}`} data-email-location="footer" class="hover:text-neutral-dark transition-colors">
                   {email}
                 </a>
               </p>
@@ -190,11 +190,11 @@ const variant = designDNA.footerVariant;
           <h3 class="font-serif text-base font-semibold mb-4 text-neutral-dark">Quick Links</h3>
           <ul class="space-y-2 text-sm text-neutral-mid">
             <li>
-              <a href="/schedule" class="font-medium text-neutral-dark hover:text-brand-primary transition-colors">
+              <a href="/schedule" data-schedule-location="footer" class="font-medium text-neutral-dark hover:text-brand-primary transition-colors">
                 &rarr; Book Appointment
               </a>
             </li>
-            <li><a href={`tel:${phone.replace(/\D/g, '')}`} class="hover:text-neutral-dark transition-colors">Call Us: {phone}</a></li>
+            <li><a href={`tel:${phone.replace(/\D/g, '')}`} data-phone-location="footer" class="hover:text-neutral-dark transition-colors">Call Us: {phone}</a></li>
             <li><a href="/faq" class="hover:text-neutral-dark transition-colors">Patient FAQ</a></li>
             <li><a href="/gallery" class="hover:text-neutral-dark transition-colors">Before & After Gallery</a></li>
             <li><a href="/about" class="hover:text-neutral-dark transition-colors">About Our Practice</a></li>
@@ -221,7 +221,7 @@ const variant = designDNA.footerVariant;
       <p class="text-sm text-neutral-mid mb-4">
         {addr.street}, {addr.city}, {addr.state} {addr.zip}
         &nbsp;&middot;&nbsp;
-        <a href={`tel:${phone.replace(/\D/g, '')}`} class="hover:text-neutral-dark transition-colors font-medium">{phone}</a>
+        <a href={`tel:${phone.replace(/\D/g, '')}`} data-phone-location="footer" class="hover:text-neutral-dark transition-colors font-medium">{phone}</a>
         &nbsp;&middot;&nbsp;
         {hours.display[0]?.time ? `${hours.display[0].day}: ${hours.display[0].time}` : 'Call for hours'}
       </p>
@@ -231,7 +231,7 @@ const variant = designDNA.footerVariant;
         <a href="/faq" class="hover:text-neutral-dark transition-colors">FAQ</a>
         <a href="/blog" class="hover:text-neutral-dark transition-colors">Blog</a>
         <a href="/financing" class="hover:text-neutral-dark transition-colors">Insurance</a>
-        <a href="/schedule" class="font-medium text-neutral-dark hover:text-brand-primary transition-colors">Book Appointment</a>
+        <a href="/schedule" data-schedule-location="footer" class="font-medium text-neutral-dark hover:text-brand-primary transition-colors">Book Appointment</a>
       </nav>
       <p class="text-xs text-neutral-mid">&copy; {currentYear} {site.name}. All rights reserved.</p>
     </div>
@@ -254,10 +254,10 @@ const variant = designDNA.footerVariant;
             </div>
           </div>
           <div class="flex flex-col sm:flex-row items-center gap-4 flex-shrink-0">
-            <a href="/schedule" class="bg-white text-brand-primary font-bold px-8 py-4 rounded-lg hover:bg-white/90 transition-colors text-sm whitespace-nowrap">
+            <a href="/schedule" data-schedule-location="footer" class="bg-white text-brand-primary font-bold px-8 py-4 rounded-lg hover:bg-white/90 transition-colors text-sm whitespace-nowrap">
               Book Appointment
             </a>
-            <a href={`tel:${phone.replace(/\D/g, '')}`}
+            <a href={`tel:${phone.replace(/\D/g, '')}`} data-phone-location="footer"
                class="font-serif text-2xl font-bold text-white hover:text-white/80 transition-colors whitespace-nowrap">
               {phone}
             </a>
@@ -276,7 +276,7 @@ const variant = designDNA.footerVariant;
               <p>{addr.street}</p>
               <p>{addr.city}, {addr.state} {addr.zip}</p>
               <p class="pt-1">
-                <a href={`mailto:${email}`} class="hover:text-white/80 transition-colors">{email}</a>
+                <a href={`mailto:${email}`} data-email-location="footer" class="hover:text-white/80 transition-colors">{email}</a>
               </p>
             </address>
           </div>

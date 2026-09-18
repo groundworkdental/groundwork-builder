@@ -39,6 +39,11 @@
  *                       — silently, because nothing validates an og: URL.
  *   truncated meta      descriptions cut mid-word by a hard slice, which is
  *                       what a searcher reads in the result.
+ *   stale agent files   llms-full.txt described a DIFFERENT practice — wrong
+ *                       name, wrong services — because the generated file is
+ *                       committed under public/ and survives when the
+ *                       generator does not re-run. No page was wrong, so
+ *                       nothing looked wrong.
  *
  * The through-line: an unset value renders as broken output rather than as
  * absent output. Templates must guard, and this catches them when they don't.
@@ -128,6 +133,16 @@ function checkEmptyHrefs(pages) {
   for (const [route, html] of pages) {
     for (const m of html.matchAll(/href="(tel:|mailto:|)"/gi)) {
       bad.push(`${route} → href="${m[1]}"`);
+    }
+    // A tel: built from the display string rather than the digits. Parens and
+    // spaces in a dial target are unreliable across handsets, and this is not
+    // an empty href so the check above never saw it. Ten template variants
+    // shipped `tel:${phone}` where phone is "(562) 420-8578".
+    for (const m of html.matchAll(/href="tel:([^"]+)"/gi)) {
+      const target = m[1];
+      if (!/^\+?[0-9;=,*#]+$/.test(target)) {
+        bad.push(`${route} → href="tel:${target}" (not dialable digits)`);
+      }
     }
   }
   if (bad.length) {
@@ -496,6 +511,63 @@ function checkMetaDescriptions(pages) {
 }
 
 
+
+/**
+ * Generated agent files must describe THIS practice.
+ *
+ * llms.txt and llms-full.txt are written by the pipeline into public/, which
+ * means they are committed and survive a build that never regenerates them.
+ * One site shipped an llms-full.txt describing a different practice entirely,
+ * carried over from another build. Nothing on any page was wrong, and these
+ * files are read by machines rather than people, so there was no symptom.
+ *
+ * Rather than reach for config, this compares two independently generated
+ * artifacts: the name in the agent file against the name in the homepage's
+ * LocalBusiness schema. If those disagree, one of them is from another build.
+ */
+async function checkAgentFiles(distDir) {
+  const home = await readMaybe(join(distDir, 'index.html'));
+  if (!home) { pass('agent files', 'no homepage to compare against'); return; }
+
+  let schemaName = null;
+  for (const m of home.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/g)) {
+    try {
+      const parsed = JSON.parse(m[1]);
+      for (const node of Array.isArray(parsed) ? parsed : [parsed]) {
+        const t = node['@type'];
+        const types = Array.isArray(t) ? t : [t];
+        if (types.some((x) => /Dentist|LocalBusiness|MedicalBusiness|Organization/.test(String(x))) && node.name) {
+          schemaName = String(node.name).trim();
+          break;
+        }
+      }
+    } catch { /* a malformed block is another check's problem */ }
+    if (schemaName) break;
+  }
+  if (!schemaName) { pass('agent files', 'no business schema on the homepage to compare against'); return; }
+
+  const problems = [];
+  let checked = 0;
+  for (const file of ['llms.txt', 'llms-full.txt']) {
+    const text = await readMaybe(join(distDir, file));
+    if (!text) continue;
+    checked++;
+    // The first markdown heading is the practice the file claims to describe.
+    const heading = (/^#\s+(.+)$/m.exec(text) || [])[1]?.trim();
+    if (!heading) { problems.push(`${file}: no title heading`); continue; }
+    const norm = (v) => v.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    if (norm(heading) !== norm(schemaName)) {
+      problems.push(`${file} says "${heading}" but the site is "${schemaName}"`);
+    }
+  }
+
+  if (!checked) { pass('agent files', 'none present'); return; }
+  problems.length
+    ? fail('agent files', `${problems.join('; ')} — regenerate, do not hand-edit`)
+    : pass('agent files', `${checked} file(s) describe ${schemaName}`);
+}
+
+
 /**
  * Every tel: link must be attributable and dialable.
  *
@@ -733,6 +805,7 @@ async function main() {
   checkMetaDescriptions(pages);
   await checkOriginAgreement(distDir);
   await checkNodePinning(clientDir);
+  await checkAgentFiles(distDir);
   await check404(distDir);
   await checkWorkingTree(clientDir);
   await checkImageSets(clientDir);

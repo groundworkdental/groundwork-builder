@@ -28,6 +28,23 @@ const {
   noindex = false,
 } = Astro.props;
 
+/**
+ * A preview deployment must never be indexed.
+ *
+ * Cloudflare sets CF_PAGES_BRANCH at build time, so the build itself knows
+ * whether it is production — which matters because most pages are prerendered
+ * and cannot inspect the request host at runtime. Any branch other than the
+ * production one is treated as a preview.
+ *
+ * This is also what makes it defensible to build a preview from imagery found
+ * on the practice's existing site before rights are confirmed: the preview is
+ * never published to search. See the imagery policy in
+ * docs/engineering/generator-rules.md.
+ */
+const productionBranch = import.meta.env.PUBLIC_PRODUCTION_BRANCH || 'main';
+const buildBranch = import.meta.env.CF_PAGES_BRANCH || '';
+const isPreviewBuild = Boolean(buildBranch) && buildBranch !== productionBranch;
+
 const canonicalURL = canonical || new URL(Astro.url.pathname, Astro.site).href;
 const ogImageURL = new URL(ogImage, Astro.site).href;
 const ga4Id = import.meta.env.PUBLIC_GA4_MEASUREMENT_ID;
@@ -108,7 +125,7 @@ const websiteSchema = {
     <meta name="description" content={description} />
     <link rel="canonical" href={canonicalURL} />
 
-    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    {(noindex || isPreviewBuild) && <meta name="robots" content="noindex, nofollow" />}
     {articleAuthor && <meta name="author" content={articleAuthor} />}
     {articleDate && <meta name="date" content={articleDate} />}
 

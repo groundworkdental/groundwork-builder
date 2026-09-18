@@ -37,7 +37,7 @@ const variant = designDNA.ctaVariant;
           {primaryCTA}
         </a>
         <a
-          href={`tel:${phone.replace(/\D/g, '')}`}
+          href={`tel:${phone.replace(/\D/g, '')}`} data-phone-location="cta-band"
           class="text-white/80 hover:text-white font-medium text-base transition-colors"
         >
           Or Call: {phone}
@@ -65,7 +65,7 @@ const variant = designDNA.ctaVariant;
               {primaryCTA}
             </a>
             <a
-              href={`tel:${phone.replace(/\D/g, '')}`}
+              href={`tel:${phone.replace(/\D/g, '')}`} data-phone-location="cta-band"
               class="text-neutral-mid hover:text-neutral-dark font-medium text-sm transition-colors text-center"
             >
               {phone}
@@ -87,7 +87,7 @@ const variant = designDNA.ctaVariant;
         Book Now &rarr;
       </a>
       <a
-        href={`tel:${phone.replace(/\D/g, '')}`}
+        href={`tel:${phone.replace(/\D/g, '')}`} data-phone-location="cta-band"
         class="text-neutral-mid hover:text-neutral-dark text-sm transition-colors"
       >
         {phone}
