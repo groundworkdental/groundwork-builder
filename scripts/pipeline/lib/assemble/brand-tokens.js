@@ -22,7 +22,7 @@
  *     rationale
  *   }
  */
-import { hexToRgb, rgbToHex, ensureContrast } from '../contrast.js';
+import { hexToRgb, rgbToHex, ensureContrast, validatePalette } from '../contrast.js';
 
 /** Blend hex A toward hex B by t∈[0,1]. Deterministic design math, not fabrication. */
 function mix(a, b, t) {
@@ -62,15 +62,50 @@ export function brandDnaToTokens(brandDna) {
   const borderTreatment = ['hairline', 'standard', 'none'].includes(shape.borderTreatment)
     ? shape.borderTreatment : 'standard';
 
+  // WCAG guard on the palette itself. `muted` was already corrected above, but
+  // `primary` was trusted to the brand prompt — and a primary that fails AA is
+  // not a local defect: it is every link, every eyebrow label, and the text on
+  // every CTA button. One run shipped #1fa8b0 at 2.88:1 against white, which
+  // axe reported as 177 serious violations across 16 pages while the design
+  // critique scored contrast 7/10 and passed the gate. Contrast is measurable,
+  // so measure it here rather than hope a later reviewer notices.
+  const paletteCheck = validatePalette({
+    primary: c.primary,
+    accent:  c.accent,
+    highlight: c.highlight || c.accent,
+    light:   c.neutralLight,
+    dark:    c.neutralDark,
+    muted,
+  });
+  for (const adj of paletteCheck.adjustments || []) {
+    console.log(`[brand-tokens] WCAG auto-correct: ${adj.key} ${adj.from} → ${adj.to} (${adj.reason})`);
+  }
+  for (const issue of paletteCheck.issuesAfter || []) {
+    console.warn(`[brand-tokens] palette still fails AA after correction: ${issue.label} at ${issue.contrast}:1`);
+  }
+
+  // A single primary cannot satisfy AA on both white and near-black: correcting
+  // it downward for light surfaces necessarily pushes it toward failing on dark
+  // ones (measured at 2.45:1 against #1e1e2e). Derive a lightened counterpart so
+  // `text-brand-primary` can resolve correctly inside dark sections instead of
+  // every template having to remember a second token.
+  const correctedPrimary = paletteCheck.palette?.primary || c.primary;
+  const primaryOnDark = ensureContrast(correctedPrimary, c.neutralDark, 4.5, { direction: 'lighter' }).hex;
+
   return {
     // Injector-required 6 (drop-in for data.brand.colors)
     colors: {
-      primary: c.primary,
+      primary: paletteCheck.palette?.primary || c.primary,
       secondary: c.secondary,
       light: c.neutralLight,
-      accent: c.accent,
+      accent: paletteCheck.palette?.accent || c.accent,
       dark: c.neutralDark,
-      muted,
+      muted: paletteCheck.palette?.muted || muted,
+      primaryOnDark,
+    },
+    contrastAudit: {
+      adjustments:     paletteCheck.adjustments || [],
+      remainingIssues: paletteCheck.issuesAfter || [],
     },
     // Full brand-dna roles preserved (the injector uses these for correct
     // surfaces/borders/text instead of reusing `muted` or hardcoding white).

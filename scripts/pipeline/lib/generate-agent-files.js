@@ -41,8 +41,33 @@ export async function generateAgentFiles(merged, navLinks, outputDir) {
   ].filter(Boolean);
   const locationText = locationParts.join(', ');
 
-  const servicesLines = services.slice(0, 20).map(s => `- ${s.name}`).join('\n');
-  const pagesLines    = allPages.map(l => `- [${l.label}](${l.href})`).join('\n');
+  const origin = domain
+    ? `https://${String(domain).replace(/^https?:\/\//, '').replace(/\/$/, '')}`
+    : '';
+
+  const fallbackPages = [
+    { label: 'Home', href: '/' },
+    { label: 'About', href: '/about/' },
+    { label: 'Services', href: '/services/' },
+    { label: 'FAQ', href: '/faq/' },
+    { label: 'Insurance', href: '/insurance/' },
+    { label: 'Contact', href: '/contact/' },
+    { label: 'Blog', href: '/blog/' },
+    { label: 'Gallery', href: '/gallery/' },
+  ];
+  const pageList = allPages.length ? allPages : fallbackPages;
+  const abs = (href) => {
+    if (!href) return origin || '/';
+    if (/^https?:\/\//i.test(href)) return href;
+    if (!origin) return href;
+    return `${origin}${href.startsWith('/') ? href : `/${href}`}`;
+  };
+  const pagesLines = pageList.map(l => `- [${l.label}](${abs(l.href)})`).join('\n');
+  const servicesLines = services.slice(0, 20).map(s => {
+    const name = s.name || s.title || String(s);
+    const slug = s.slug || String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return origin ? `- [${name}](${origin}/services/${slug}/)` : `- ${name}`;
+  }).join('\n');
 
   const llmsTxt = [
     `# ${practice.name || 'Dental Practice'}`,
@@ -55,7 +80,7 @@ export async function generateAgentFiles(merged, navLinks, outputDir) {
     '## Key pages',
     pagesLines,
     '',
-    ...(servicesLines ? ['## Services offered', servicesLines] : []),
+    ...(servicesLines ? ['## Services', servicesLines] : []),
   ].join('\n').trim() + '\n';
 
   await writeFile(resolve(outputDir, 'public', 'llms.txt'), llmsTxt, 'utf-8');

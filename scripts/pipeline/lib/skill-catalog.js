@@ -93,11 +93,11 @@ const PHASE_INFO = {
   },
   'Define Brand': {
     summary:
-      'Defines the rebuild\'s visual identity (brand-dna) by ELEVATING the practice\'s OBSERVED current design — never a category template. AI decides the palette (evolved from the real site colors — grounded, so it stays distinctive), shape, and elevation. FONTS are NOT picked by the LLM (that converges on one safe font every time): instead a deterministic, character-bucketed, per-practice-hash-seeded pairing is chosen from a curated set of vetted modern Google pairs. applyBrandToMerged writes merged.brand.{colors,roles,fonts}. Replaces the old Design-Extract + Brand-Direction split.',
-    input:  'merged.currentDesign (palette/type/mood observed by the silver design pass) + design-principles core',
+      'Defines practice COLOR identity (brand-dna): small scrape anchor (usually primary hue) + strong elevation — not mood→palette recipes, not scrape-cloning, not category dental defaults. Thin skills/design.md + design-principles-core §A only (taste-frontend is NOT injected). FONTS from curated seeded pairings; catalog --reference overwrites type bucket + shape/elevation. applyBrandToMerged writes merged.brand.{colors,roles,fonts}.',
+    input:  'merged.currentDesign + skills/design.md (identity) + design-principles-core §A (floor)',
     output: 'brandDna { color{8 roles}, typography{families + scale}, shape, elevation, rationale } → merged.brand',
-    tools:  ['Anthropic Sonnet 4.6', 'lib/brand/brand-dna.js', 'lib/brand/font-pairings.js (deterministic + seeded)', 'lib/assemble/brand-tokens.js'],
-    qc:     ['WCAG AA (enforced in prompt + verified by brand-eval)', 'No category templating (elevate, don\'t reinvent)', 'Fonts convergence-proof (curated + seeded, not LLM-chosen)'],
+    tools:  ['Anthropic Sonnet 4.6', 'lib/brand/brand-dna.js', 'lib/brand/font-pairings.js', 'lib/assemble/brand-tokens.js', 'optional reference-entry.js'],
+    qc:     ['WCAG AA in prompt', 'No category / mood→palette templating', 'Fonts convergence-proof (curated + seeded)'],
     cost:   'Sonnet — single call',
     skip:   '--skip-design',
   },

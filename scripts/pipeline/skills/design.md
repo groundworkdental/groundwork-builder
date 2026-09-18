@@ -1,79 +1,39 @@
-# Design Skill
+# Design Skill — Practice Identity (Brand DNA only)
 
-This document defines the design judgment standards applied during the Define Brand (brand-dna) step. Edit this file to evolve color, typography, and aesthetic decisions across all future site builds.
+Thin judgment for **Define Brand**. Does not prescribe template look, fonts, shape, or mood→palette recipes.
 
----
-
-## Core Principle: Elevated, Not Reinvented
-
-The goal is never to ignore the existing brand — it's to take what's there and make it feel like the best version of itself. A practice with muted greens should get a refined, intentional green palette, not a complete rebrand to navy.
+**Not this file:** layout variants, type buckets, corners/elevation → catalog `--reference` `entry.json`. Section craft → Impeccable. Universal bans → `design-principles-core.md` + `anti-slop.js`.
 
 ---
 
-## Color
+## Principle: Small anchor, strong elevation
 
-**Avoid "dental defaults."** Hospital blue, plain white, toothpaste green — these are clichés. The palette should feel distinctive while still being appropriate for healthcare.
+Keep only a **small identity signal** from the original site — usually the primary hue family (or logo color). Build a polished, modern system around it.
 
-**Primary color** sets the brand character. It should be used for CTAs, key headings, and major UI elements. It needs sufficient contrast against white for accessibility (WCAG AA minimum).
-
-**Light color** is a section background — it must be very light (luminance > 90%). If it's too saturated, it fights with content. When in doubt, go lighter.
-
-**Accent colors** should feel intentional and warm. Earth tones, warm neutrals, and muted golds work well as accents in dental contexts. Avoid neon or overly saturated accents.
-
-**Palette cohesion:** All colors should look like they belong together. A warm primary needs warm accents. A cool primary needs cool complements. Never mix a warm and cool palette without a deliberate bridge color.
-
-**Color psychology for dental:**
-- Green: growth, calm, natural — works well for holistic/neighborhood practices
-- Deep teal: trust, stability, modern — good for premium/comprehensive practices
-- Warm taupe/cream: approachable, gentle — good for family/comfort-focused practices
-- Deep navy: authority, confidence — good for cosmetic/high-end practices
-- Avoid: bright red (urgency/alarm), orange (too casual), pure black (harsh)
+- Prefer a confident elevated palette over timid “barely changed” copies.
+- Weak / chaotic / cliché originals get **more freedom** (distill, replace muddy accents, drop dental-default looks).
+- Strong, distinctive originals may keep more of their character — still elevate neutrals, contrast, and cohesion.
+- Never invent a generic “what dental should look like” category brand. Never copy the scrape 1:1.
 
 ---
 
-## Typography
+## Color (identity only)
 
-**Heading fonts** should have character — a serif with personality, or a sans-serif with a distinctive cut. Avoid overused defaults like Open Sans or Roboto for headings.
+- **Anchor:** evolve the observed primary into a confident, accessible brand primary (CTAs, key UI).
+- **System:** secondary, one intentional accent, and neutrals that pass WCAG AA (`text` on `background` ≥ 4.5:1; primary on background for large UI ≥ 3:1).
+- **Surfaces:** `neutralLight` / section washes stay very light (luminance ≳ 92%).
+- **Cohesion:** temperatures should read as one system; bridge warm/cool only deliberately.
+- **Avoid:** hospital-blue / toothpaste-green clichés, pure `#000`, neon, purple→indigo AI defaults, high-sat primary + high-sat accent fighting each other.
 
-**Body fonts** must prioritize readability above all. Inter, Lato, Source Sans 3, and DM Sans are reliable choices. The body font should disappear — the reader shouldn't notice it.
-
-**Pairing rule:** Serif heading + sans-serif body is the most reliable combination. Two sans-serifs can work if they have enough contrast in weight/width. Avoid two serifs.
-
-**All fonts must be available on Google Fonts.**
-
----
-
-## Mood & Feel
-
-The mood label ("Warm Modern Luxury", "Clean Clinical Trust") should guide every downstream decision. When generating a palette and font pairing, check them against the mood — they should feel like they belong to the same concept.
-
-Common moods for dental:
-- **Warm Neighborhood** — approachable, personal, community-rooted (warmer palette, softer radius, readable serif)
-- **Modern Premium** — sleek, confident, cosmetic-leaning (cooler palette, tight radius, clean sans)
-- **Clean Clinical** — trustworthy, precise, no-nonsense (neutral palette, medium radius, high contrast)
-- **Soft & Gentle** — calming, low-anxiety, family-friendly (muted warm palette, large radius, soft shadows)
+Do **not** map practice type → fixed color families (no “family = taupe”, “cosmetic = navy” tables). Diversity comes from the scrape anchor + template reference, not from this skill.
 
 ---
 
-## UI Details
+## Out of scope here
 
-**Border radius** affects perceived personality:
-- `sm` — precise, professional, slightly formal
-- `md` — balanced, modern, versatile
-- `lg` — friendly, approachable, contemporary
-- `xl` — very soft, gentle, casual
-
-**Shadow style** affects depth and premium feel:
-- `soft` — subtle, modern, clean (preferred for premium)
-- `medium` — balanced, works for most contexts
-- `sharp` — more formal, slightly dated — use sparingly
-
----
-
-## What to Avoid
-
-- Copying the existing palette exactly without elevation
-- Palettes that look good in isolation but fail against white backgrounds
-- Fonts that require loading more than 2 Google Font families (performance cost)
-- High-saturation accent colors paired with a high-saturation primary
-- Designing for aesthetics alone — every choice should serve the practice's positioning
+| Concern | Owner |
+|---------|--------|
+| Fonts | `font-pairings.js` + catalog type bucket |
+| Shape / elevation / border | Catalog `entry.json` (or brand-dna defaults if no reference) |
+| Section composition | Catalog variants + director / assemble |
+| Anti-slop craft detail | `design-principles-core.md`, Impeccable, `anti-slop.js` |

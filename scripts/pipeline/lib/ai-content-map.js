@@ -53,6 +53,7 @@ export async function runContentMap(scraped, merged, audit, preset, opts = {}) {
     const { callAnthropic } = await import('./ai-call.js');
     const result = await callAnthropic({
       phase:     'content-map',
+      cache:     true,
       model:     'claude-sonnet-4-6',
       // Audit-only output is smaller than full content map (no per-section copy)
       // but with 30+ services × audit entry it can still be ~6-8k tokens.
@@ -248,7 +249,11 @@ function buildServicePageContent(services, inventory) {
     const lines = [`### ${svc.slug} (${svc.name})`];
     if (page.h1) lines.push(`H1: ${page.h1}`);
     if (page.metaDesc) lines.push(`Meta: ${page.metaDesc}`);
-    if (page.paragraphs?.length) page.paragraphs.slice(0, 4).forEach(p => lines.push(`  ${p.slice(0, 300)}`));
+    if (page.narrative) {
+      lines.push(page.narrative.slice(0, 2000));
+    } else if (page.paragraphs?.length) {
+      page.paragraphs.slice(0, 4).forEach(p => lines.push(`  ${p.slice(0, 300)}`));
+    }
     blocks.push(lines.join('\n'));
   }
   return blocks.length > 0 ? blocks.join('\n\n') : 'No matching service pages found in crawl.';
@@ -308,9 +313,11 @@ function buildPageInventorySummary(inventory) {
     const lines = [`### ${page.path || page.url}`];
     if (page.title) lines.push(`Title: ${page.title}`);
     if (page.h1) lines.push(`H1: ${page.h1}`);
-    if (page.h2s?.length) lines.push(`H2s: ${page.h2s.join(' | ')}`);
     if (page.metaDesc) lines.push(`Meta: ${page.metaDesc}`);
-    if (page.paragraphs?.length) {
+    if (page.narrative) {
+      lines.push('Content (narrative):');
+      lines.push(page.narrative.slice(0, 2500));
+    } else if (page.paragraphs?.length) {
       lines.push(`Content excerpts:`);
       page.paragraphs.slice(0, 3).forEach(p => lines.push(`  • ${p.slice(0, 200)}`));
     }

@@ -558,6 +558,8 @@ These are principles for what good copy looks like at each level. NO specific ph
 - **CTA labels**: a verb + a specific noun ("Book Appointment", "Meet Dr. Hoang"). Never "Learn More", "Click Here", "Get Started", or "Submit".
 - **Don't repeat**: if the H1 already says "Family Dentist in Long Beach", the subheadline does not need to say "family dental care in Long Beach" again with different words. Move the conversation forward.
 - **Don't fabricate**: if a number, claim, credential, or quote is not in the brief, do not invent one. Omit it.
+- **Don't perform honesty.** Just tell the truth. Do not add a clause that proves you are being real ("so you can see what we see", "not a slogan", "before anyone starts", "the visit is clear"). No character-thesis headlines ("We look closely, then we treat"). If you have a fact, state it. If you don't, write less.
+- **Don't gatekeep**: never write "this is not that office" or "if you want X, go elsewhere".
 
 ## Doctor name handling
 The \`doctor\` config object has TWO name fields — pick the right one for context:
@@ -648,6 +650,18 @@ ${sectionBrief}
 5. ALL \`import\` statements MUST appear at the top of the frontmatter, BEFORE any \`let\`/\`const\`/\`try\`/\`if\` statements. Imports cannot follow non-import code — this is an ES module requirement.
 6. Use ONLY the Tailwind classes from the token map above. No arbitrary values like \`[#2D6E7E]\` or \`[42px]\`.
 7. Use \`brand-primary\` and \`brand-secondary\` color tokens (defined in tailwind.config.mjs).
+7b. TEXT OPACITY — no \`text-white/70\`, \`/60\`, \`/50\`, \`/40\` (or any value below /90) on
+    body or label text. The brand palette is generated per practice, so a tint that
+    reads fine against one primary fails WCAG AA against a darker one: \`text-white/70\`
+    over a brand-primary surface measures 3.49:1 against a 4.5 requirement, and axe
+    flags it on every page the component appears on. Use solid \`text-white\` for text.
+    Opacity below /90 is only acceptable on non-text elements (borders, dividers, icons
+    that are decorative).
+7c. TEXT ON DARK SURFACES — inside a \`bg-neutral-dark\` or \`bg-brand-secondary\`
+    band, use \`text-brand-on-dark\` rather than \`text-brand-primary\` for accent
+    text. \`brand-primary\` is tuned for AA against light surfaces, so on a dark
+    band it measures around 2.35:1; \`brand-on-dark\` is the lightened counterpart
+    and is a real token in tailwind.config.mjs.
 8. NO TypeScript type annotations in frontmatter (plain JavaScript only).
 9. Do NOT import React. This is Astro — use Astro template syntax only.
 10. Section must be self-contained: reads config via imports, no required props (unless it's CTABlock which accepts an optional phone prop).

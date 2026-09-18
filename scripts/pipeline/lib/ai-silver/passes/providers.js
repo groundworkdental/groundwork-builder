@@ -16,13 +16,14 @@ const PATTERNS = [
 ];
 
 export function selectPages(bronze) {
-  const matched = pagesMatching(bronze.pages, PATTERNS);
+  const softDupPaths = new Set((bronze.softDups || []).map((s) => s.path));
+  const matched = pagesMatching(bronze.pages, PATTERNS).filter((p) => !softDupPaths.has(p.path));
   const home = bronze.pages.find(p => p.path === '/' || p.path === '');
   const set = new Set(matched);
   if (home) set.add(home);
   // Also include any page whose body text mentions "Dr." multiple times — likely a provider page
   for (const p of bronze.pages) {
-    if (set.has(p)) continue;
+    if (set.has(p) || softDupPaths.has(p.path)) continue;
     const drCount = (p.bodyText || '').match(/\bDr\.\s+[A-Z]/g)?.length || 0;
     if (drCount >= 3) set.add(p);
   }
@@ -71,5 +72,12 @@ export async function run({ bronze, pages }) {
   const { slice } = await runPassCall({
     name, model: MODELS.default, prompt, maxTokens: 16000,
   });
+  // Programmatic gate (silver judgment) — do not trust marketing name-drops
+  const { filterDoctors } = await import('../provider-filter.js');
+  const { doctors, dropped } = filterDoctors(slice.doctors || [], bronze);
+  if (dropped.length) {
+    console.log(`[ai-silver:providers] filtered ${dropped.length} weak doctor(s): ${dropped.map(d => d.name).join(', ')}`);
+  }
+  slice.doctors = doctors;
   return slice;
 }

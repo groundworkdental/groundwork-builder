@@ -289,7 +289,7 @@ function buildDesignSystem(dna, merged, design) {
     'No centered-headline + two-CTA + microlinks hero — the most overused AI pattern.',
     'No stat-bar section if yearsExperience/happyPatients data is missing — render empty = fail.',
     'No stock photography of smiling model families.',
-    'No generic, boilerplate, or template-sounding copy. Every headline, tagline, and CTA must reference this specific practice, doctor, or city — never industry-generic phrasing that could appear on any competitor site.',
+    'No template dental slogans ("your trusted partner", "comprehensive care"). Say what this practice actually does. Do not define the brand by attacking other offices or telling some patients they are in the wrong place.',
     `No archetype+hero combo already used in recent own-builds.`,
     'No section that renders with dashes, nulls, or placeholder text visible to users.',
   ];

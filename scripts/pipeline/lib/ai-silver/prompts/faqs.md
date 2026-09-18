@@ -30,6 +30,13 @@ Note: some of these pages may NOT be traditional FAQ pages — they may be servi
 # Rules
 
 1. **EVERY Q+A** — do not skip any. If the FAQ page has 25 questions, return 25 entries.
+1b. **EVERY PAGE that has an FAQ block must appear in the output.** When a page
+   contains a heading like "Frequently Asked Questions" or "<Topic> FAQs", every
+   question heading below it must come back with that page's path as `source`.
+   Returning nothing for such a page is a failure, not a judgement call — a long
+   treatment page is exactly where a full FAQ block tends to sit, and skipping it
+   because the page is "mostly about the treatment" loses the practice's own
+   answers. Work through the pages one at a time and do not stop early.
 2. **VERBATIM** — copy question and answer exactly as they appear. Do not summarize, abbreviate, or rephrase answers. The whole point of capturing FAQs is to preserve the practice's actual words.
 3. **Long answers are OK** — answers can be multi-paragraph. Preserve all of them. Join paragraphs with `\\n\\n`.
 4. **Category** — derive from the page name or section heading on the page. A page titled "Pediatric Dental FAQs" → category "pediatric". A page titled "Common Orthodontic Questions" → category "orthodontic".

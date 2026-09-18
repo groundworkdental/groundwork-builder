@@ -53,7 +53,7 @@ const procedures = ['All', ...Array.from(new Set(images.map(i => i.procedure).fi
           class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
         />
         {image.procedure && (
-          <span class="absolute top-2 left-2 bg-brand-navy/80 text-white text-xs font-semibold px-2 py-1 rounded-full pointer-events-none">
+          <span class="absolute top-2 left-2 bg-neutral-dark/80 text-white text-xs font-semibold px-2 py-1 rounded-full pointer-events-none">
             {image.procedure}
           </span>
         )}
@@ -167,11 +167,11 @@ const procedures = ['All', ...Array.from(new Set(images.map(i => i.procedure).fi
       btn.addEventListener('click', () => {
         filterBtns.forEach(b => {
           b.setAttribute('aria-pressed', 'false');
-          b.classList.remove('bg-brand-navy', 'text-white', 'border-brand-navy');
+          b.classList.remove('bg-brand-primary', 'text-white', 'border-brand-primary');
           b.classList.add('border-gray-300', 'text-neutral-mid');
         });
         btn.setAttribute('aria-pressed', 'true');
-        btn.classList.add('bg-brand-navy', 'text-white', 'border-brand-navy');
+        btn.classList.add('bg-brand-primary', 'text-white', 'border-brand-primary');
         btn.classList.remove('border-gray-300', 'text-neutral-mid');
         applyFilter(btn.dataset.filter ?? 'all');
       });
@@ -180,14 +180,14 @@ const procedures = ['All', ...Array.from(new Set(images.map(i => i.procedure).fi
     // Set initial active state on "All" button
     const allBtn = document.querySelector<HTMLButtonElement>('[data-filter="all"]');
     if (allBtn) {
-      allBtn.classList.add('bg-brand-navy', 'text-white', 'border-brand-navy');
+      allBtn.classList.add('bg-brand-primary', 'text-white', 'border-brand-primary');
       allBtn.classList.remove('border-gray-300', 'text-neutral-mid');
     }
 
     // Style inactive filter buttons
     filterBtns.forEach(btn => {
       if (btn.dataset.filter !== 'all') {
-        btn.classList.add('border-gray-300', 'text-neutral-mid', 'hover:border-brand-navy', 'hover:text-brand-navy');
+        btn.classList.add('border-gray-300', 'text-neutral-mid', 'hover:border-brand-primary', 'hover:text-brand-primary');
       }
     });
 

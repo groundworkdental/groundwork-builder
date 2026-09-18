@@ -56,13 +56,31 @@ export async function run({ bronze, pages }) {
     }
   }
 
+  // additionalContent ceiling. The flat 12 was binding on 5 of 6 sites measured
+  // — every one landed on exactly 12 — so the cap, not the site, was deciding how
+  // much verbatim prose survived. 12 was also never the intended figure: the
+  // schema catalog documents this bucket as "capped 30 items, ~2200 chars each".
+  //
+  // Scale with the pages this pass actually reads, since that is the pool the
+  // blocks come from, and hold the documented 30 as the ceiling. Consumers draw
+  // from this pool by type (doctor / service-page / faq / blog briefs), so a
+  // larger pool is filtered down per section rather than pasted into one prompt,
+  // and coverage-audit's `additional-content-not-surfaced` check already reports
+  // anything rescued here that never reaches the build.
+  const acCap = Math.max(12, Math.min(30, pages.length * 2));
+
   const tmpl = await loadPrompt('content');
   const prompt = fillTemplate(tmpl, {
     baseUrl: bronze.baseUrl,
     pageContext: renderPagesAsContext(pages, { bodyChars: 10000, paragraphs: 60, images: 10, includeJsonLd: false }),
     formLinks: JSON.stringify(formLinks.slice(0, 30), null, 2),
     areaHints: JSON.stringify([...new Set(areaHints)].slice(0, 40), null, 2),
+    acCap: String(acCap),
   });
   const { slice } = await runPassCall({ name, model: MODELS.default, prompt, maxTokens: 12000 });
+  // Report the ceiling that actually applied. Without it, anything measuring
+  // headroom later has to guess the cap, and a guess that drifts from the prompt
+  // reports saturation on the wrong number.
+  slice.acCap = acCap;
   return slice;
 }

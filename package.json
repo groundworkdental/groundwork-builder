@@ -31,6 +31,7 @@
     "ops:dev": "node --env-file=.env scripts/pipeline/ops-wrangler.mjs dev",
     "dashboard": "node scripts/generate-practice-dashboard.js",
     "test": "node scripts/pipeline/_test/run-offline.mjs",
+    "eval:batch": "node --env-file=.env scripts/pipeline/eval-batch.js",
     "test:fixtures": "node scripts/pipeline/_test/test-fixtures.js",
     "smoke:d1": "node --env-file=.env scripts/pipeline/_test/smoke-d1.mjs",
     "smoke": "node --env-file=.env scripts/pipeline/_test/smoke-operable.mjs",
@@ -42,7 +43,9 @@
     "legacy:migrate-airtable-crm": "node --env-file=.env scripts/legacy/migrate-airtable-crm.mjs",
     "legacy:migrate-airtable-sourced": "node --env-file=.env scripts/legacy/migrate-airtable-sourced.mjs",
     "prune:clients": "node scripts/pipeline/_test/prune-client-dupes.mjs",
-    "prune:clients:apply": "node scripts/pipeline/_test/prune-client-dupes.mjs --apply"
+    "prune:clients:apply": "node scripts/pipeline/_test/prune-client-dupes.mjs --apply",
+    "verify": "node scripts/pipeline/verify-build.js",
+    "verify:silver": "node scripts/pipeline/verify-silver.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

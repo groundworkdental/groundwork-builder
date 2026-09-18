@@ -171,6 +171,19 @@ export async function run({ bronze, pages }) {
     slice.hours = slice.hours || {};
     if (!slice.hours.raw) slice.hours.raw = detected.hoursRaw;
   }
+
+  // Sanity-check hours — correct obvious am/pm CMS typos; only drop if unrecoverable
+  if (slice.hours) {
+    const { sanitizeHours } = await import('../hours-sanity.js');
+    const { corrected, rejected } = sanitizeHours(slice.hours);
+    if (corrected.length) {
+      console.warn(`[ai-silver:contact] corrected ${corrected.length} hour row(s): ${corrected.map(r => `${r.day}:${r.from}→${r.to}`).join(', ')}`);
+    }
+    if (rejected.length) {
+      console.warn(`[ai-silver:contact] rejected ${rejected.length} implausible hour row(s): ${rejected.map(r => `${r.day}:${r.time}(${r.reason})`).join(', ')}`);
+    }
+  }
+
   // Geo + map URL fallbacks
   slice.address = slice.address || {};
   if (geo.lat != null && slice.address.lat == null) { slice.address.lat = geo.lat; slice.address.lng = geo.lng; }

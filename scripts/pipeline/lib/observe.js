@@ -24,11 +24,25 @@ import { chromium } from 'playwright';
 
 const MODEL = 'claude-sonnet-4-6';
 
+const AXE_CORE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js';
+
 // Anthropic's vision API rejects images whose largest dimension exceeds 8000px.
 // `fullPage: true` screenshots of long landing pages routinely break this on
 // pages with many sections (hero + doctor + services + reviews + gallery + cta).
 // We resize down to this cap before sending to the API. Headroom from 8000.
 const MAX_IMAGE_DIMENSION = 7500;
+
+// Above roughly this size on the long edge, the vision API downsamples the
+// image before the model sees it. A 1280×5391 full-page capture therefore
+// arrives as something near 372×1568 — a desktop layout squeezed to phone
+// width, which is unreadable for judging typography, spacing, or hierarchy.
+// The critique was scoring that. Tiles stay under the threshold on both edges,
+// so they are passed through at full fidelity.
+const VISION_LONG_EDGE = 1568;
+
+// Tiles per viewport. The whole page isn't needed to judge craft, and each tile
+// costs real tokens — the top of the page carries most of the design signal.
+const MAX_TILES_PER_VIEWPORT = 3;
 
 /**
  * Observe a built Astro project.
@@ -47,6 +61,7 @@ export async function observe({
   viewports = [{ w: 1280, h: 900 }, { w: 375, h: 812 }],
   narrate   = false,
   fullPage  = true,
+  measureContrast = true,
 } = {}) {
   if (!projectDir) throw new Error('observe: projectDir required');
 
@@ -58,6 +73,7 @@ export async function observe({
   await mkdir(outDir, { recursive: true });
 
   const screenshots = [];
+  let contrast = null;
 
   try {
     const browser = await chromium.launch({ headless: true });
@@ -76,13 +92,29 @@ export async function observe({
           // Long landing pages with full-page screenshots routinely hit this.
           buf = await ensureWithinDimensionCap(buf, path);
 
-          screenshots.push({
-            route,
-            viewport: vp,
-            path,
-            base64:   buf.toString('base64'),
-            bytes:    buf.length,
-          });
+          // Slice the tall capture into viewport-sized tiles the API won't
+          // downsample. One 1280×5391 image tells the model almost nothing;
+          // three 1280×900 tiles show it the actual design.
+          // Contrast is measurable, so measure it once rather than asking the
+          // critique to judge it from a picture. One run scored contrast 7/10
+          // and passed the gate on a page axe found 177 failures on.
+          if (measureContrast && contrast === null) {
+            contrast = await measureContrastViolations(page);
+          }
+
+          const tiles = await sliceIntoTiles(buf, vp, outDir, slug);
+          for (const tile of tiles) {
+            screenshots.push({
+              route,
+              viewport: vp,
+              path:     tile.path,
+              base64:   tile.buf.toString('base64'),
+              bytes:     tile.buf.length,
+              mediaType: tile.mediaType,
+              tile:      tile.index,
+              tiles:     tiles.length,
+            });
+          }
         }
         await ctx.close();
       }
@@ -96,7 +128,96 @@ export async function observe({
   let observations;
   if (narrate) observations = await narrateScreenshots(screenshots);
 
-  return { screenshots, observations, base };
+  return { screenshots, observations, contrast, base };
+}
+
+// ---------------------------------------------------------------------------
+// Measured contrast
+// ---------------------------------------------------------------------------
+
+/**
+ * Run axe-core's `color-contrast` rule against the live page.
+ *
+ * Returns null when axe can't be injected (offline, CSP) so callers can tell
+ * "no violations" apart from "not measured" — scoring a dimension as clean
+ * because the check failed to run is how the design gate lied in the first place.
+ */
+async function measureContrastViolations(page) {
+  try {
+    await page.addScriptTag({ url: AXE_CORE_CDN });
+    const result = await page.evaluate(async () => {
+      // eslint-disable-next-line no-undef
+      const r = await axe.run(document, { runOnly: { type: 'rule', values: ['color-contrast'] } });
+      const v = (r.violations || []).find(x => x.id === 'color-contrast');
+      if (!v) return { violations: 0, samples: [] };
+      return {
+        violations: (v.nodes || []).length,
+        samples: (v.nodes || []).slice(0, 5).map(n => ({
+          html: (n.html || '').slice(0, 140),
+          summary: (n.any?.[0]?.message || n.failureSummary || '').slice(0, 200),
+        })),
+      };
+    });
+    return result;
+  } catch (err) {
+    console.warn(`[observe] contrast measurement unavailable (${err.message}).`);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tiling
+// ---------------------------------------------------------------------------
+
+/**
+ * Cut a full-page capture into viewport-height tiles.
+ *
+ * Returns the original buffer as a single tile when the image is already small
+ * enough to survive the vision pipeline intact, or when `sharp` is unavailable.
+ */
+async function sliceIntoTiles(buf, vp, outDir, slug) {
+  let sharp;
+  try {
+    sharp = (await import('sharp')).default;
+  } catch {
+    return [{ index: 0, buf, path: join(outDir, `${slug}.png`), mediaType: 'image/png' }];
+  }
+
+  try {
+    const meta = await sharp(buf).metadata();
+    const width  = meta.width  || vp.w;
+    const height = meta.height || vp.h;
+
+    // Already within the pass-through window — no tiling needed.
+    if (Math.max(width, height) <= VISION_LONG_EDGE) {
+      return [{ index: 0, buf, path: join(outDir, `${slug}.png`), mediaType: 'image/png' }];
+    }
+
+    // Tile height is capped so neither edge crosses the threshold.
+    const tileHeight = Math.min(vp.h, VISION_LONG_EDGE, Math.max(1, height));
+    const count = Math.min(MAX_TILES_PER_VIEWPORT, Math.ceil(height / tileHeight));
+
+    const tiles = [];
+    for (let i = 0; i < count; i++) {
+      const top = i * tileHeight;
+      const h   = Math.min(tileHeight, height - top);
+      if (h <= 0) break;
+      const tilePath = join(outDir, `${slug}-tile${i + 1}.jpg`);
+      // JPEG, not PNG: per-tile PNGs actually total *more* bytes than the one
+      // full-page PNG they replace, and payload size is what was dropping the
+      // socket. q85 is visually lossless for judging layout and type.
+      const tileBuf = await sharp(buf)
+        .extract({ left: 0, top, width, height: h })
+        .jpeg({ quality: 85 })
+        .toBuffer();
+      await writeFile(tilePath, tileBuf);
+      tiles.push({ index: i, buf: tileBuf, path: tilePath, mediaType: 'image/jpeg' });
+    }
+    return tiles.length ? tiles : [{ index: 0, buf, path: join(outDir, `${slug}.png`) }];
+  } catch (err) {
+    console.warn(`[observe] tiling failed (${err.message}); using the full-page capture.`);
+    return [{ index: 0, buf, path: join(outDir, `${slug}.png`), mediaType: 'image/png' }];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -204,7 +325,7 @@ async function narrateScreenshots(shots) {
       messages:  [{
         role: 'user',
         content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: s.base64 } },
+          { type: 'image', source: { type: 'base64', media_type: s.mediaType || 'image/png', data: s.base64 } },
           {
             type: 'text',
             text:
