@@ -50,7 +50,8 @@
     "check:content:built": "node scripts/check-content.mjs --built",
     "log": "node --env-file=.env scripts/log.mjs",
     "mail": "node --env-file=.env scripts/mail.mjs",
-    "verify:ready": "node scripts/pipeline/verify-ready.js"
+    "verify:ready": "node scripts/pipeline/verify-ready.js",
+    "tg": "node --env-file=.env scripts/tg.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
