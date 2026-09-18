@@ -21,6 +21,7 @@
  */
 
 import { logEvent } from './events.js';
+import { ask, telegramConfigured } from './telegram.js';
 import { d1Query } from './d1.js';
 
 /** What a client message is asking for. */
@@ -199,6 +200,24 @@ export async function route({ slug = null, limit = 20, dryRun = false } = {}) {
         detail: `${decision.reason}\n\nre: ${msg.summary}`,
         sourceRef: `routed:${msg.id}`,
       });
+
+      // The ask branch reaches a human now rather than waiting for someone to
+      // open a session. Non-fatal: a question that could not be delivered is
+      // still on the ledger, and losing the question would be worse than
+      // losing the notification.
+      if (decision.action === 'ask' && telegramConfigured()) {
+        const res = await ask({
+          slug: msg.slug,
+          question: `How should we handle: "${msg.summary}"?`,
+          context: `${decision.reason}. From ${msg.actor}.`,
+          options: classification.intent === 'unclear'
+            ? ['reply asking them to clarify', 'I will handle it']
+            : ['draft a reply', 'make the change', 'ignore'],
+          sourceRef: `ask-for:${msg.id}`,
+        });
+        result.askEventId = res.eventId;
+        result.askDelivered = res.delivered;
+      }
 
       if (decision.proposal) {
         result.proposalId = await writeProposal({
