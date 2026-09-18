@@ -182,6 +182,16 @@ export function validatePalette(palette) {
   const checks = [
     { fg: 'primary', bg: 'light',   target: 4.5, label: 'primary text on brand-light bg' },
     { fg: 'primary', bg: '#ffffff', target: 4.5, label: 'primary text on white bg' },
+    // Accent is used for eyebrow labels, prices, and highlight text on the same
+    // light surfaces as primary. It was omitted here, so a gold/amber accent
+    // (#b8860b at ~3.1:1) failed on nearly every page while the palette
+    // reported clean.
+    { fg: 'accent',  bg: 'light',   target: 4.5, label: 'accent text on brand-light bg' },
+    { fg: 'accent',  bg: '#ffffff', target: 4.5, label: 'accent text on white bg' },
+    // `highlight` is emitted as a Tailwind token alongside primary/accent and is
+    // used the same way (eyebrow labels, emphasis text), but was never checked.
+    { fg: 'highlight', bg: 'light',   target: 4.5, label: 'highlight text on brand-light bg' },
+    { fg: 'highlight', bg: '#ffffff', target: 4.5, label: 'highlight text on white bg' },
     { fg: 'dark',    bg: 'light',   target: 7.0, label: 'dark text (body) on brand-light bg' },
     { fg: 'muted',   bg: 'light',   target: 4.5, label: 'muted text on brand-light bg' },
   ];
@@ -207,25 +217,27 @@ export function validatePalette(palette) {
   // background it'll be used on. The brand-light (off-white tint) often has
   // lower contrast than pure white because it's slightly darker — so target
   // whichever produces the lower starting contrast.
-  const primaryFailures = issues.filter(i => i.fg === 'primary');
-  if (primaryFailures.length > 0) {
+  for (const role of ['primary', 'accent', 'highlight']) {
+    if (!corrected[role]) continue;
+    if (!issues.some(i => i.fg === role)) continue;
+
     const candidates = ['#ffffff'];
     if (corrected.light) candidates.push(corrected.light);
     // Pick the bg that yields the lowest contrast — fixing for that one
     // automatically fixes the easier ones.
     const worstBg = candidates
-      .map(bg => ({ bg, ratio: contrast(corrected.primary, bg) }))
+      .map(bg => ({ bg, ratio: contrast(corrected[role], bg) }))
       .sort((a, b) => a.ratio - b.ratio)[0].bg;
 
-    const result = ensureContrast(corrected.primary, worstBg, 4.5);
+    const result = ensureContrast(corrected[role], worstBg, 4.5);
     if (result.adjusted) {
       adjustments.push({
-        key: 'primary',
-        from: corrected.primary,
+        key: role,
+        from: corrected[role],
         to: result.hex,
         reason: `original ${result.originalContrast}:1 against ${worstBg} < AA threshold; darkened ${result.steps} step(s) to ${result.contrast}:1`,
       });
-      corrected.primary = result.hex;
+      corrected[role] = result.hex;
     }
   }
 

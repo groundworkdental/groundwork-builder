@@ -18,6 +18,30 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 
+/**
+ * Abort a stream after this long with no data.
+ *
+ * Well above normal inter-token latency, far below the point where a run has
+ * silently lost an hour. A *total* timeout cannot do this job: a degraded
+ * socket that trickles one token occasionally never trips one. One run spent
+ * 2h03m inside a phase that normally takes 137s, logging only 4 transient
+ * errors — the connection was not failing, it was crawling.
+ */
+const DEFAULT_STALL_MS = 60_000;
+
+/**
+ * Per-phase ceilings, roughly 4x the observed median (content-map ~128s,
+ * content ~155s, architect ~71s). Generous enough for a legitimately slow
+ * call, tight enough that a wedged one cannot consume the run.
+ */
+const PHASE_TIMEOUT_MS = {
+  content:       600_000,
+  'content-map': 500_000,
+  architect:     300_000,
+  critique:      300_000,
+};
+const DEFAULT_TIMEOUT_MS = 300_000;
+
 const PRICE_INPUT_PER_M  = 3.00;
 const PRICE_OUTPUT_PER_M = 15.00;
 
@@ -45,16 +69,67 @@ let _debugCounter = 0;
  * @param {boolean} [opts.parseJson]    - Convenience: returns parsed JSON if the response is JSON-shaped
  * @returns {Promise<{ text: string, content: any, parsed?: any, usage: object, cost: number, model: string }>}
  */
-export async function callAnthropic({ phase, model, maxTokens = 4096, messages, system, temperature, extra }, opts = {}) {
+export async function callAnthropic({ phase, model, maxTokens = 4096, messages, system, temperature, extra, cache = false, stallMs = DEFAULT_STALL_MS, timeoutMs }, opts = {}) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
 
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
-  const client = new Anthropic({ apiKey });
+  // Content-map/write prompts are large (100k+ chars) and can need long TTFT;
+  // default SDK timeout (~10m) is fine for most, but network stacks sometimes
+  // abort earlier — keep an explicit 15m ceiling for big phases.
+  // A flat 15-minute client timeout is 6-7x what these calls actually take
+  // (content-map ~128s, content ~155s, architect ~71s). Kept only as an outer
+  // backstop; the stall watchdog below is what actually bounds a hung stream.
+  const client = new Anthropic({ apiKey, timeout: 900_000 });
+  const callTimeout = timeoutMs || PHASE_TIMEOUT_MS[phase] || DEFAULT_TIMEOUT_MS;
+  let stallSeconds = 0;
+  let backoffSeconds = 0;
 
-  const requestBody = { model, max_tokens: maxTokens, messages, ...(extra || {}) };
+  // Prompt caching. The immediate win is retries: Content Write re-uploaded its
+  // full ~36k-token prompt on each of four attempts during one network blip.
+  // Marking the prompt cacheable makes every retry after the first a cache read.
+  //
+  // Cross-call reuse (Map's prefix serving Write's) needs both prompts to begin
+  // with a byte-identical block, which they don't yet — that lands with the
+  // Content Write decomposition, and this plumbing is what it will use.
+  let messagesToSend = messages;
+  if (cache) {
+    messagesToSend = messages.map((msg, i) => {
+      if (i !== messages.length - 1) return msg;
+      const parts = Array.isArray(msg.content)
+        ? msg.content
+        : [{ type: 'text', text: msg.content }];
+      // The breakpoint marks the end of the cacheable prefix, so it goes on the
+      // last block of the prompt we want cached.
+      const marked = parts.map((part, j) =>
+        j === parts.length - 1 ? { ...part, cache_control: { type: 'ephemeral' } } : part
+      );
+      return { ...msg, content: marked };
+    });
+  }
+
+  const requestBody = { model, max_tokens: maxTokens, messages: messagesToSend, ...(extra || {}) };
   if (system) requestBody.system = system;
   if (typeof temperature === 'number') requestBody.temperature = temperature;
+
+  // Stream large generations — long non-streaming content/map calls often die
+  // with opaque "Connection error" mid-response; streaming keeps the socket warm.
+  // Count text and images separately. A single JSON.stringify over `messages`
+  // folds base64 image data into the character count, which is how a critique
+  // call carrying two screenshots was read as a 2.8M-character prompt — it was
+  // ~3k tokens of pictures, not 700k of text. Streaming keys off text size.
+  let promptChars = system?.length || 0;
+  let imageBytes = 0;
+  for (const msg of messages) {
+    const parts = Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: msg.content }];
+    for (const part of parts) {
+      if (part?.type === 'image') imageBytes += (part.source?.data?.length || 0);
+      else promptChars += (part?.text?.length || 0);
+    }
+  }
+  const imageNote = imageBytes ? `, images≈${Math.round(imageBytes / 1024)}KB base64` : '';
+  const cacheNote = cache ? ', cacheable' : '';
+  const useStream = maxTokens >= 8192 || promptChars >= 60_000;
 
   let response;
   let attempt = 0;
@@ -63,17 +138,64 @@ export async function callAnthropic({ phase, model, maxTokens = 4096, messages, 
   while (attempt < maxAttempts) {
     attempt++;
     try {
-      response = await client.messages.create(requestBody);
+      if (useStream) {
+        if (attempt === 1) {
+          console.log(`  [ai-call:${phase}] streaming (text≈${promptChars} chars${imageNote}${cacheNote}, maxTokens=${maxTokens})`);
+        }
+        // Watchdog on silence, not on total duration.
+        //
+        // A total timeout is close to useless on a stream: a degraded socket
+        // that trickles one token occasionally never trips it, it just drags.
+        // One run spent 2h03m inside a phase that normally takes 137s and
+        // logged only 4 transient errors — the connection wasn't failing, it
+        // was crawling, and nothing was watching. This aborts after `stallMs`
+        // of no data so the existing retry path can take over.
+        const stream = client.messages.stream(requestBody, { timeout: callTimeout });
+        let lastActivity = Date.now();
+        const bump = () => { lastActivity = Date.now(); };
+        stream.on('streamEvent', bump);
+        stream.on('text', bump);
+
+        let stalled = false;
+        const watchdog = setInterval(() => {
+          const idle = Date.now() - lastActivity;
+          if (idle >= stallMs) {
+            stalled = true;
+            stallSeconds += Math.round(idle / 1000);
+            try { stream.abort(); } catch { /* already settled */ }
+          }
+        }, 2000);
+
+        try {
+          response = await stream.finalMessage();
+        } catch (err) {
+          if (stalled) {
+            const e = new Error(`stream stalled — no data for ${Math.round(stallMs / 1000)}s`);
+            e.isStall = true;
+            throw e;
+          }
+          throw err;
+        } finally {
+          clearInterval(watchdog);
+          stream.off?.('streamEvent', bump);
+          stream.off?.('text', bump);
+        }
+      } else {
+        response = await client.messages.create(requestBody);
+      }
       break;
     } catch (err) {
       const status = err?.status ?? err?.response?.status;
-      const transient = !status || status === 429 || (status >= 500 && status < 600);
+      // A stall is transient by construction — the socket went quiet, so retry.
+      const transient = err?.isStall || !status || status === 429 || (status >= 500 && status < 600);
       if (!transient || attempt >= maxAttempts) throw err;
       // Exponential backoff: 1.5s, 4s, 10s. Large prompts (75K+ chars) on
       // flaky connections sometimes need multiple retries before the request
       // actually lands, so we're more patient than the original 1.5s × 1.
+      backoffSeconds += Math.round(([1500, 4000, 10000][attempt - 1] || 10000) / 1000);
       const backoffMs = [1500, 4000, 10000][attempt - 1] || 10000;
-      console.warn(`  [ai-call:${phase}] transient error (status ${status || 'network'}, attempt ${attempt}/${maxAttempts}); retrying in ${backoffMs}ms…`);
+      const why = err?.message || err?.cause?.message || String(err);
+      console.warn(`  [ai-call:${phase}] transient error (status ${status || 'network'}, attempt ${attempt}/${maxAttempts}): ${why.slice(0, 160)}; retrying in ${backoffMs}ms…`);
       await new Promise(r => setTimeout(r, backoffMs));
     }
   }
@@ -92,7 +214,14 @@ export async function callAnthropic({ phase, model, maxTokens = 4096, messages, 
     outputTokens,
     cost: +cost.toFixed(4),
     attempts: attempt,
+    // Time lost to a wedged connection, so a slow run is diagnosable from the
+    // ledger instead of being mistaken for a code regression.
+    stallSeconds,
+    backoffSeconds,
   });
+  if (stallSeconds || backoffSeconds) {
+    console.warn(`  [ai-call:${phase}] lost ${stallSeconds + backoffSeconds}s to network (${attempt} attempt(s), ${stallSeconds}s stalled)`);
+  }
   _ledger.totalInputTokens  += inputTokens;
   _ledger.totalOutputTokens += outputTokens;
   _ledger.totalCost         += cost;
@@ -122,6 +251,8 @@ export function getCostLedger() {
     totalOutputTokens: _ledger.totalOutputTokens,
     totalCost:         +_ledger.totalCost.toFixed(4),
     callCount:         _ledger.calls.length,
+    networkLostSeconds: _ledger.calls.reduce((s, c) => s + (c.stallSeconds || 0) + (c.backoffSeconds || 0), 0),
+    retriedCalls:       _ledger.calls.filter(c => (c.attempts || 1) > 1).length,
   };
 }
 
