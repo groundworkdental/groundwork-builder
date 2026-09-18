@@ -14,14 +14,7 @@ const tests = [
   'test-reference-entry.js',
   'test-grade-homepage.js',
   'test-fixtures.js',
-  // test-generators.js is NOT registered yet. blog-generator is fixed as of
-  // this commit, but four checks still fail against main because they cover
-  // work that is still uncommitted in the working tree:
-  //   generatePages · suppressIntroFor        -> page-generator.js
-  //   injectTailwindConfig · WCAG guard       -> injector.js / contrast.js
-  //   generated component colour repairs      -> generate-sections.js
-  //   callAnthropic · module wiring           -> ai-call.js
-  // Register it in the commit that lands those.
+  'test-generators.js',
   'test-crawl-select.js',
   'test-faq-repair.js',
   'test-silver-fidelity.js',

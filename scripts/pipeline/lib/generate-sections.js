@@ -39,6 +39,85 @@ const CONDITIONAL_GENERATE = ['services', 'doctor-intro', 'stat-bar', 'reviews']
  * @param {string} outputDir  - Absolute path to the output project directory
  * @returns {Promise<{ generated: string[], files: string[], errors: string[] }>}
  */
+/**
+ * Remove opacity from text colours in a generated component.
+ *
+ * Opacity on text is the one thing that can defeat every other colour guard.
+ * The palette guard proves each token clears AA at full strength; compositing it
+ * against its background at 30% or 70% throws that guarantee away, and the
+ * result depends on a background the component cannot see. Measured cases:
+ * `text-white/70` on brand-primary at 3.49:1, `text-neutral-mid/30` on white at
+ * 1.48:1.
+ *
+ * Tuning to a "safe" opacity does not hold either — `/90` cleared 4.67:1 against
+ * one generated primary and 4.45:1 against a slightly darker one the next run.
+ * The palette changes per practice, so any fixed percentage is a coin flip.
+ *
+ * So: text goes solid. If a design genuinely wants subdued text, the answer is a
+ * muted *token* that passes AA at full opacity — not a strong token dimmed.
+ *
+ * Only text utilities are touched. Borders, dividers, and decorative icons keep
+ * their opacity; contrast requirements do not apply to them.
+ */
+function repairTextOpacity(content) {
+  let fixes = 0;
+  // Any text colour, not just white/black — `text-neutral-mid/30` slipped
+  // through the narrower form and shipped 8 nodes at 1.48:1.
+  const repaired = String(content || '').replace(
+    /\btext-([a-z]+(?:-[a-z0-9]+)*)\/(\d{1,3})\b/g,
+    (match, token, pct) => {
+      if (Number(pct) >= 100) return match;
+      fixes++;
+      return `text-${token}`;
+    }
+  );
+  return { content: repaired, fixes };
+}
+
+/**
+ * Both colour repairs, applied to whichever markup a section generator emitted.
+ * Sections are written through two paths (shim + legacy) and both carry the
+ * same classes, so the repair has to sit on both or it silently covers half.
+ */
+function repairComponentColours(content) {
+  const opacity = repairTextOpacity(content);
+  const onDark  = repairPrimaryOnDark(opacity.content);
+  const notes = [
+    opacity.fixes && `raised ${opacity.fixes} low text-opacity value(s)`,
+    onDark.fixes  && `re-pointed ${onDark.fixes} brand-primary text to brand-on-dark`,
+  ].filter(Boolean).join(' and ');
+  return { content: onDark.content, notes };
+}
+
+/**
+ * Re-point brand-primary text to the on-dark variant inside dark components.
+ *
+ * Brand primary is corrected for AA against light surfaces, which necessarily
+ * costs it contrast on dark ones — the generated footer put
+ * `text-brand-primary` eyebrow labels on `bg-neutral-dark` at 2.35:1, on every
+ * page of the site.
+ *
+ * An earlier attempt solved this with a CSS descendant selector and made things
+ * worse: `.bg-neutral-dark .text-brand-primary` also matches white cards nested
+ * inside a dark section, so the light variant landed on white. Scoping to a
+ * whole component is coarse but sound — a component whose root surface is dark
+ * has a dark background throughout, which is exactly the case that fails.
+ * Components with any light surface are left alone.
+ */
+function repairPrimaryOnDark(content) {
+  const src = String(content || '');
+  const DARK = /\bbg-(?:neutral-dark|brand-secondary)\b/;
+  const LIGHT = /\bbg-(?:white|surface-1|surface-2|brand-light|neutral-light)\b/;
+  if (!DARK.test(src) || LIGHT.test(src)) return { content: src, fixes: 0 };
+
+  let fixes = 0;
+  const repaired = src.replace(/\b((?:hover:|focus:|group-hover:)?)text-brand-primary\b/g, (_m, variant) => {
+    fixes++;
+    return `${variant}text-brand-on-dark`;
+  });
+  return { content: repaired, fixes };
+}
+
 export async function generateSections(dna, practice, merged, bronze, outputDir) {
   const sectionOrder = dna.sectionOrder || [];
 
@@ -94,15 +173,19 @@ export async function generateSections(dna, practice, merged, bronze, outputDir)
           const shimAbs  = resolve(outputDir, result.shimFile);
           await mkdir(dirname(jsonAbs), { recursive: true });
           await writeFile(jsonAbs, result.jsonContent, 'utf8');
-          await writeFile(shimAbs, result.shimContent, 'utf8');
+          const shimRepaired = repairComponentColours(result.shimContent);
+          await writeFile(shimAbs, shimRepaired.content, 'utf8');
           generated.push(sectionType);
           files.push(result.shimFile);
           console.log(`    [generate] ${sectionType} → ${result.shimFile} (variant: ${result.meta?.variantKey})`);
+          if (shimRepaired.notes) console.log(`    [generate] ${shimRepaired.notes} in ${result.shimFile}`);
         } else {
           // Legacy path: write Astro file directly
           const absPath = resolve(outputDir, result.file);
           await mkdir(dirname(absPath), { recursive: true });
-          await writeFile(absPath, result.content, 'utf8');
+          const fixed = repairComponentColours(result.content);
+          await writeFile(absPath, fixed.content, 'utf8');
+          if (fixed.notes) console.log(`    [generate] ${fixed.notes} in ${result.file}`);
           generated.push(sectionType);
           files.push(result.file);
           console.log(`    [generate] ${sectionType} → ${result.file}`);

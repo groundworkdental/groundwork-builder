@@ -197,7 +197,7 @@ ${items}
  * @param {string} outputDir - Root of the generated Astro project
  * @param {object} [preset]  - Loaded vertical preset (from preset-loader).
  */
-export async function generatePages(data, outputDir, preset = null, contentPlan = null) {
+export async function generatePages(data, outputDir, preset = null, contentPlan = null, opts = {}) {
   // Hubs are disabled — delete all preset hub template pages from the template.
   // Service pages are generated fresh from scraped data only.
   const presetHubSlugs = Object.keys(preset?.hubs?.descriptions || {});
@@ -232,7 +232,7 @@ export async function generatePages(data, outputDir, preset = null, contentPlan 
   if (contentPlan) await injectFinancial(data, outputDir, contentPlan);
 
   // Generate a page for every scraped service
-  const generatedServicePages = await generateIndividualServicePages(data, outputDir);
+  const generatedServicePages = await generateIndividualServicePages(data, outputDir, opts.suppressIntroFor);
   if (generatedServicePages > 0) {
     console.log(`  Generated ${generatedServicePages} individual service page(s).`);
   }
@@ -292,7 +292,7 @@ async function updateServicesIndex(outputDir, services = [], data = {}) {
  * If AI-written content exists for the service (from content phase), it's used.
  * Otherwise a minimal page is generated using the service name and practice info.
  */
-async function generateIndividualServicePages(data, outputDir) {
+async function generateIndividualServicePages(data, outputDir, suppressIntroFor = null) {
   const services = data.services?.offered || [];
   if (services.length === 0) return 0;
 
@@ -411,6 +411,15 @@ async function generateIndividualServicePages(data, outputDir) {
     const titleWithCity = city ? `${titleService} ${city}` : titleService;
 
     let intro = content?.intro || null;
+
+    // When the practice's own page for this service is ported onto this route
+    // verbatim (see page-port.js), the written intro is a summary of the very
+    // text rendered directly beneath it. Measured across 13 service pages, the
+    // intro repeated a mean of 48% of the body — one page 100%. The practice's
+    // own words win, so the summary is dropped rather than shown twice.
+    if (suppressIntroFor?.has(d.svc.slug)) {
+      intro = null;
+    }
     let structuredPage = null;  // Full structured output from ai-service-page.js
     if (d.source === 'ai-rewrite') {
       const r = rewriteResults[rewriteIdx++];
@@ -555,9 +564,27 @@ async function injectFaqs(data, outputDir) {
   let content;
   try { content = await readFile(filePath, 'utf-8'); } catch { return; }
 
-  const faqs = (data.content?.faqs || data.faqs || [])
-    .filter(f => f && f.question && f.answer);
-  if (!faqs.length) return;   // no scraped FAQs → leave generic template defaults
+  // Scraped FAQs are the practice's own answers and always win. Generated ones
+  // (written only when the site had none) are the fallback — this page used to
+  // ignore them entirely while the homepage and llms.txt consumed them.
+  const faqs = (
+    (data.content?.faqs?.length ? data.content.faqs : null)
+    || data.content?.generatedFAQs
+    || data.faqs
+    || []
+  ).filter(f => f && f.question && f.answer);
+
+  if (!faqs.length) {
+    // The template ships six generic Q&As with invented answers about insurance,
+    // financing, and emergency policy. Publishing those for a practice that
+    // stated none is fabrication — empty the list and let the page render bare.
+    const emptied = content.replace(/const\s+faqs\s*=\s*\[[\s\S]*?\];/, 'const faqs = [];');
+    if (emptied !== content) {
+      await writeFile(filePath, emptied, 'utf-8');
+      console.log('  No FAQs found — cleared the template\'s generic placeholder FAQs.');
+    }
+    return;
+  }
 
   const arr = faqs
     .map(f => `  { question: ${JSON.stringify(f.question)}, answer: ${JSON.stringify(f.answer)} },`)
