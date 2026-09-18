@@ -395,7 +395,7 @@ async function discoverPractices() {
       },
       pipeline,
       audit: { ...audit, dir: auditRel },
-      github: `https://github.com/gwgunther/groundwork-builder/tree/main/${relClient}`,
+      github: `https://github.com/groundworkdental/groundwork-builder/tree/main/${relClient}`,
     });
   }
 
