@@ -1,0 +1,50 @@
+{
+  "palette": {
+    "primary": "#0e5f65",
+    "secondary": "#0f1f4a",
+    "accent": "#7a5209",
+    "background": "#f0f8f9",
+    "mood": "professional, welcoming"
+  },
+  "type": {
+    "display": "Epilogue",
+    "body": "Public Sans",
+    "scale": "standard",
+    "contrast": "high"
+  },
+  "layout": {
+    "archetype": "editorial-asymmetric",
+    "density": "balanced",
+    "grid": "12col"
+  },
+  "hero": {
+    "variant": "asymmetric-right",
+    "imageTreatment": "warm-documentary"
+  },
+  "sections": [
+    "hero",
+    "doctor-intro",
+    "services",
+    "reviews",
+    "gallery",
+    "faq",
+    "stat-bar",
+    "cta"
+  ],
+  "cards": "soft-shadow",
+  "motion": "subtle",
+  "radius": "sm",
+  "fontPair": "Epilogue/Public Sans",
+  "adjectives": [
+    "trustworthy",
+    "approachable",
+    "clinical-yet-warm",
+    "family-focused",
+    "modern-professional"
+  ],
+  "slug": "artsfamilydentistry",
+  "source": "/Users/garrettgunther/Projects/groundwork-builder/clients/arts-family-dentistry",
+  "tag": "own",
+  "captured": "2026-08-12",
+  "note": "auto-distilled at build time"
+}

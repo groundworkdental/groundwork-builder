@@ -1,0 +1,50 @@
+{
+  "palette": {
+    "primary": "#2a6b5c",
+    "secondary": "#1d4d42",
+    "accent": "#c9a96e",
+    "background": "#f2f7f5",
+    "mood": "warm, trustworthy"
+  },
+  "type": {
+    "display": "Manrope",
+    "body": "Mulish",
+    "scale": "standard",
+    "contrast": "high"
+  },
+  "layout": {
+    "archetype": "warm-editorial",
+    "density": "balanced",
+    "grid": "12col"
+  },
+  "hero": {
+    "variant": "centered",
+    "imageTreatment": "warm-documentary"
+  },
+  "sections": [
+    "hero",
+    "doctor-intro",
+    "services",
+    "reviews",
+    "gallery",
+    "faq",
+    "stat-bar",
+    "cta"
+  ],
+  "cards": "soft-shadow",
+  "motion": "subtle",
+  "radius": "md",
+  "fontPair": "Manrope/Mulish",
+  "adjectives": [
+    "approachable",
+    "pediatric-focused",
+    "calm-professional",
+    "nature-inspired",
+    "family-friendly"
+  ],
+  "slug": "cutesmiles4kids",
+  "source": "/Users/garrettgunther/Projects/groundwork-builder/clients/cute-smiles-4-kids",
+  "tag": "own",
+  "captured": "2026-08-08",
+  "note": "auto-distilled at build time"
+}

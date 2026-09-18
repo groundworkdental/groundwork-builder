@@ -1,0 +1,50 @@
+{
+  "palette": {
+    "primary": "#1a3c61",
+    "secondary": "#2e6da4",
+    "accent": "#b8860b",
+    "background": "#f0f4f8",
+    "mood": "professional, trustworthy"
+  },
+  "type": {
+    "display": "Albert Sans",
+    "body": "Work Sans",
+    "scale": "standard",
+    "contrast": "high"
+  },
+  "layout": {
+    "archetype": "warm-editorial",
+    "density": "balanced",
+    "grid": "12col"
+  },
+  "hero": {
+    "variant": "full-bleed",
+    "imageTreatment": "editorial-muted"
+  },
+  "sections": [
+    "hero",
+    "doctor-intro",
+    "services",
+    "reviews",
+    "gallery",
+    "faq",
+    "stat-bar",
+    "cta"
+  ],
+  "cards": "soft-shadow",
+  "motion": "subtle",
+  "radius": "md",
+  "fontPair": "Albert Sans / Work Sans",
+  "adjectives": [
+    "clinical-yet-warm",
+    "credential-forward",
+    "accessible",
+    "patient-centric",
+    "academically-grounded"
+  ],
+  "slug": "azorthodonticcenter",
+  "source": "/Users/garrettgunther/Projects/groundwork-builder/clients/arizona-orthodontic-centers",
+  "tag": "own",
+  "captured": "2026-08-08",
+  "note": "auto-distilled at build time"
+}

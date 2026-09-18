@@ -565,6 +565,70 @@
         "soft-gentle",
         "modern-premium"
       ]
+    },
+    {
+      "slug": "artsfamilydentistry",
+      "tag": "own",
+      "source": "/Users/garrettgunther/Projects/groundwork-builder/clients/arts-family-dentistry",
+      "captured": "2026-08-12",
+      "archetype": "editorial-asymmetric",
+      "mood": "professional, welcoming",
+      "fontPair": "Epilogue/Public Sans",
+      "adjectives": [
+        "trustworthy",
+        "approachable",
+        "clinical-yet-warm",
+        "family-focused",
+        "modern-professional"
+      ]
+    },
+    {
+      "slug": "cutesmiles4kids",
+      "tag": "own",
+      "source": "/Users/garrettgunther/Projects/groundwork-builder/clients/cute-smiles-4-kids",
+      "captured": "2026-08-08",
+      "archetype": "warm-editorial",
+      "mood": "warm, trustworthy",
+      "fontPair": "Manrope/Mulish",
+      "adjectives": [
+        "approachable",
+        "pediatric-focused",
+        "calm-professional",
+        "nature-inspired",
+        "family-friendly"
+      ]
+    },
+    {
+      "slug": "azorthodonticcenter",
+      "tag": "own",
+      "source": "/Users/garrettgunther/Projects/groundwork-builder/clients/arizona-orthodontic-centers",
+      "captured": "2026-08-08",
+      "archetype": "warm-editorial",
+      "mood": "professional, trustworthy",
+      "fontPair": "Albert Sans / Work Sans",
+      "adjectives": [
+        "clinical-yet-warm",
+        "credential-forward",
+        "accessible",
+        "patient-centric",
+        "academically-grounded"
+      ]
+    },
+    {
+      "slug": "mansfielddds",
+      "tag": "own",
+      "source": "/Users/garrettgunther/Projects/groundwork-builder/clients/mansfielddds",
+      "captured": "2026-08-22",
+      "archetype": "warm-editorial",
+      "mood": "professional, warm",
+      "fontPair": "DM Serif Display / DM Sans",
+      "adjectives": [
+        "clinical-refined",
+        "trust-forward",
+        "sage-grounded",
+        "accessibility-first",
+        "modern-dental"
+      ]
     }
   ]
 }

@@ -1,0 +1,50 @@
+{
+  "palette": {
+    "primary": "#1C3340",
+    "secondary": "#1C5066",
+    "accent": "#816531",
+    "background": "#F7F5F0",
+    "mood": "professional, warm"
+  },
+  "type": {
+    "display": "DM Serif Display",
+    "body": "DM Sans",
+    "scale": "editorial",
+    "contrast": "high"
+  },
+  "layout": {
+    "archetype": "warm-editorial",
+    "density": "balanced",
+    "grid": "12col"
+  },
+  "hero": {
+    "variant": "centered",
+    "imageTreatment": "editorial-muted"
+  },
+  "sections": [
+    "hero",
+    "doctor-intro",
+    "services",
+    "reviews",
+    "gallery",
+    "faq",
+    "stat-bar",
+    "cta"
+  ],
+  "cards": "soft-shadow",
+  "motion": "subtle",
+  "radius": "md",
+  "fontPair": "DM Serif Display / DM Sans",
+  "adjectives": [
+    "clinical-refined",
+    "trust-forward",
+    "sage-grounded",
+    "accessibility-first",
+    "modern-dental"
+  ],
+  "slug": "mansfielddds",
+  "source": "/Users/garrettgunther/Projects/groundwork-builder/clients/mansfielddds",
+  "tag": "own",
+  "captured": "2026-08-22",
+  "note": "auto-distilled at build time"
+}
