@@ -923,6 +923,155 @@ async function checkGeneratorLeakage(clientDir) {
 
 
 /**
+ * A provider on the site must actually practise at this location.
+ *
+ * personSchemas maps every entry in doctors[] to `worksFor` with THIS
+ * practice's address. On the first client that produced a machine-readable
+ * claim, on four pages, that a prosthodontist works at a Mansfield, Texas
+ * address — while his own bio in the same config said full-time faculty in
+ * New York with a private practice in Fort Lee, New Jersey. The same name
+ * then reached the Google listing description as leading implant care.
+ *
+ * Nobody wrote that claim. It was the default, the way the consent line on
+ * BeforeAfter was the default, and the fix is the same: make the
+ * relationship a declared field, so asserting it requires stating it.
+ *
+ *   practicing  sees patients here — gets worksFor, may be named in
+ *               listing copy and in "led by" language
+ *   visiting    associated, not based here
+ *   consulting  advises, does not see patients here
+ *
+ * The heuristic below is deliberately narrow. A bio naming a DIFFERENT
+ * state alongside "private practice" is the signal; training history
+ * ("DDS, NYU") names cities legitimately and must not fire.
+ */
+async function checkProviderAffiliation(clientDir) {
+  const config = await readMaybe(join(clientDir, 'src', 'config', 'site.ts'));
+  if (!config) {
+    pass('provider affiliation', 'no src/config/site.ts to read');
+    return;
+  }
+
+  const state = config.match(/\bstate:\s*'([A-Z]{2})'/)?.[1] || null;
+  const city = config.match(/\bcity:\s*'([^']+)'/)?.[1] || null;
+  if (!state) {
+    pass('provider affiliation', 'no practice state in config');
+    return;
+  }
+
+  // Split the config into per-doctor blocks by name field.
+  const blocks = [];
+  const nameRe = /\bname:\s*'([^']+)'/g;
+  let m;
+  while ((m = nameRe.exec(config)) !== null) {
+    blocks.push({ name: m[1], start: m.index });
+  }
+  for (let i = 0; i < blocks.length; i++) {
+    blocks[i].text = config.slice(blocks[i].start, blocks[i + 1]?.start ?? config.length);
+  }
+
+  const problems = [];
+  for (const b of blocks) {
+    if (!/\bbio(Short)?:/.test(b.text)) continue;       // not a provider block
+    const declared = /\baffiliation:\s*'(practicing|visiting|consulting)'/.exec(b.text)?.[1];
+    const elsewhere = /private practice[^.]{0,80}?\b([A-Z][a-z]+(?: [A-Z][a-z]+)*),\s*(New Jersey|New York|California|Texas|Florida|Illinois|[A-Z]{2})\b/.exec(b.text);
+    if (!elsewhere) continue;
+
+    const namedState = elsewhere[2];
+    const sameState = namedState === state ||
+      (city && elsewhere[1] && elsewhere[1].includes(city));
+    if (sameState) continue;
+
+    if (!declared) {
+      problems.push(
+        `${b.name}: bio places a private practice in ${elsewhere[1]}, ${namedState}, ` +
+          `but personSchemas will assert worksFor at the ${state} address. ` +
+          `Add affiliation: 'practicing' | 'visiting' | 'consulting'`,
+      );
+    } else if (declared !== 'practicing') {
+      // Declared non-practicing is fine — flag only if schema still claims it.
+      if (/worksFor/.test(config) && !/affiliation === 'practicing'/.test(config)) {
+        problems.push(
+          `${b.name}: declared '${declared}' but personSchemas still emits worksFor ` +
+            `for every doctor — gate the schema on affiliation`,
+        );
+      }
+    }
+  }
+
+  if (problems.length) {
+    fail('provider affiliation', problems.join('; '));
+    return;
+  }
+  pass('provider affiliation', `${blocks.length} provider block(s), no unstated out-of-state affiliation`);
+}
+
+/**
+ * The listing and the site must agree, and the listing config must derive
+ * rather than retype.
+ *
+ * Checks what can be checked without the Google API, which is gated behind a
+ * 60-day organization age. When scripts/gbp.mjs exists, `diff` covers the
+ * live side; this covers the config side, which is where drift starts.
+ */
+async function checkGbpConsistency(clientDir) {
+  const gbpSrc = await readMaybe(join(clientDir, 'src', 'config', 'gbp.ts'));
+  if (!gbpSrc) {
+    warn('gbp consistency', 'no src/config/gbp.ts — the listing has no reviewable intended state');
+    return;
+  }
+  const site = await readMaybe(join(clientDir, 'src', 'config', 'site.ts'));
+  const problems = [];
+  const missing = [];
+
+  // Derivation, not retyping: the derived block must reference site.ts.
+  if (!/from '\.\/site'/.test(gbpSrc)) {
+    problems.push('gbp.ts does not import from site.ts — every fact in it is a second copy that will drift');
+  }
+  for (const [label, re] of [
+    ['phone', /phone:\s*site\./],
+    ['address', /address:\s*`?\$\{address\./],
+    ['hours', /hours:\s*hours\./],
+  ]) {
+    if (!re.test(gbpSrc)) problems.push(`${label} is not derived from site.ts`);
+  }
+
+  // The website link Google serves should be attributable in GA4.
+  if (!/utm_source=google/.test(gbpSrc)) {
+    problems.push('website link carries no utm_source=google — listing traffic will be indistinguishable from the rest of organic');
+  }
+
+  // A CID that resolves to another business is invisible until someone opens it.
+  const cid = /verifiedCid:\s*'([^']*)'/.exec(gbpSrc)?.[1] || '';
+  if (!cid) missing.push('verifiedCid (open googleProfileLink and confirm it resolves to this listing)');
+  if (site && /\[YOUR_GOOGLE_PROFILE_ID\]/.test(site)) {
+    problems.push('site.googleProfileLink is still the scaffold placeholder');
+  }
+
+  for (const [label, re] of [
+    ['primary category', /primary:\s*'([^']+)'/],
+    ['description', /description:\s*'([^']{10,})'/],
+    ['locationId', /locationId:\s*'([^']+)'/],
+  ]) {
+    if (!re.test(gbpSrc)) missing.push(label);
+  }
+  if (/services:\s*\[\]/.test(gbpSrc)) missing.push('services');
+
+  if (problems.length) {
+    fail('gbp consistency', problems.join('; '));
+    return;
+  }
+  if (missing.length) {
+    // Unset is the normal state of a new listing and must never block a
+    // deploy; a reminder that blocks gets silenced within a week.
+    warn('gbp consistency', `derivation is correct; still unset: ${missing.join(', ')}`);
+    return;
+  }
+  pass('gbp consistency', 'listing config derives from site.ts and is fully populated');
+}
+
+
+/**
  * A built 404.html is what makes Pages answer 404 at all.
  *
  * With none, it falls back to index.html with a 200 for unmatched routes, so
@@ -989,6 +1138,8 @@ async function main() {
   await checkWranglerVars(clientDir);
   await checkConfigBypass(clientDir);
   await checkGeneratorLeakage(clientDir);
+  await checkProviderAffiliation(clientDir);
+  await checkGbpConsistency(clientDir);
   checkStaleConditionalCopy(pages, await readMaybe(join(clientDir, 'src', 'config', 'site.ts')));
 
   const failed = results.filter((r) => !r.ok);
