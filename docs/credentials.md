@@ -32,9 +32,17 @@ Current scopes: D1 Edit, Pages Edit, Workers Scripts Edit, Workers R2 Storage
 Edit, Access (Apps + Identity Providers) Edit, Email Sending Edit, and per-zone
 DNS Edit, Workers Routes Edit, Analytics Read.
 
-**R2 S3 credentials are separate** and can only be minted in the dashboard:
-R2 → Manage API Tokens → Create → Object Read & Write. They land in `.env` as
-`R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`.
+**R2 needs no separate credential.** An R2 "API token" is an ordinary
+Cloudflare token: the S3 access key id is the token's id, and the secret is the
+SHA-256 of the token value. Since `CLOUDFLARE_API_TOKEN` already carries
+Workers R2 Storage:Edit, `.env` holds only `CLOUDFLARE_API_TOKEN_ID` and the
+pair is computed at runtime.
+
+Minting a dedicated R2 token would have worked too, and would have been a
+second copy of an authority already held — one more thing to rotate, leak and
+later fail to explain. `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` still
+override, which is what you want if you ever scope a token to a single
+bucket.
 
 ## Google
 
