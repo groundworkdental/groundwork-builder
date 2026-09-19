@@ -99,9 +99,10 @@ kinds: ${EVENT_KINDS.join(', ')}`);
       return;
     }
     if (untriaged.length) {
-      console.log(`\nUNTRIAGED (${untriaged.length}) — would this exist on the next site?\n`);
+      console.log(`\nNEEDS A DECISION (${untriaged.length})\n`);
       for (const e of untriaged) {
-        console.log(`  ${short(e.id)}  ${when(e.occurred_at)}  ${e.slug}  ${e.summary}`);
+        const kind = e.kind === 'decision' ? 'proposal' : 'triage';
+        console.log(`  ${short(e.id)}  ${when(e.occurred_at)}  [${kind}]  ${e.slug}  ${e.summary}`);
       }
     }
     if (unrouted.length) {

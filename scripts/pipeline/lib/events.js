@@ -91,9 +91,16 @@ export async function timeline(slug, { limit = 200 } = {}) {
 export async function openTriage({ slug = null } = {}) {
   const where = slug ? 'AND slug = ?' : '';
   const params = slug ? [slug] : [];
+  // Proposals are decisions, not changes, and were missing from this query —
+  // so a router proposal showed on the dashboard queue and not in `log open`.
+  // Two surfaces disagreeing about what needs a human is the one thing this
+  // ledger exists to prevent.
   const untriaged = await d1Query(
     `SELECT * FROM client_events
-      WHERE kind = 'change' AND systemic IS NULL ${where}
+      WHERE ((kind = 'change' AND systemic IS NULL)
+          OR (kind = 'decision' AND summary LIKE 'PROPOSAL:%'
+              AND (routed_to IS NULL OR routed_to = '')))
+        ${where}
       ORDER BY occurred_at ASC`,
     params,
   );
