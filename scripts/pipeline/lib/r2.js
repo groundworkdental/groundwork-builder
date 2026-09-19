@@ -18,16 +18,40 @@ import { createHash, createHmac } from 'node:crypto';
 const REGION = 'auto';          // R2 ignores region but SigV4 requires one
 const SERVICE = 's3';
 
+/**
+ * S3 credentials, derived from the Cloudflare API token rather than minted
+ * separately.
+ *
+ * R2 does not issue its own identity: an R2 "API token" is an ordinary
+ * Cloudflare token, and the S3 pair is computed from it — the access key id is
+ * the token's id, and the secret is the SHA-256 of the token value. So a token
+ * that already carries Workers R2 Storage:Edit needs no companion credential.
+ *
+ * That is worth doing rather than pasting two more strings into .env. Every
+ * credential is a thing to rotate, leak, and forget the purpose of, and this
+ * one would have been a second copy of an authority we already hold.
+ *
+ * R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY still override, for a token scoped
+ * to one bucket when this one is scoped to the account.
+ */
 function settings() {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
   const bucket = process.env.R2_BUCKET || 'groundwork-builder-data';
+
+  let accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  let secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+
+  if ((!accessKeyId || !secretAccessKey) && process.env.CLOUDFLARE_API_TOKEN_ID && process.env.CLOUDFLARE_API_TOKEN) {
+    accessKeyId = process.env.CLOUDFLARE_API_TOKEN_ID;
+    secretAccessKey = createHash('sha256').update(process.env.CLOUDFLARE_API_TOKEN).digest('hex');
+  }
+
   if (!accountId || !accessKeyId || !secretAccessKey) {
     throw new Error(
-      'R2 is not configured. In .env:\n' +
-      '  R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY  (R2 → Manage API Tokens → Create)\n' +
-      '  R2_BUCKET                                (default: groundwork-builder-data)',
+      'R2 is not configured. Either:\n' +
+      '  CLOUDFLARE_API_TOKEN_ID  — the id of a token with Workers R2 Storage:Edit\n' +
+      '                             (curl .../user/tokens/verify returns it), or\n' +
+      '  R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY — a dedicated R2 token',
     );
   }
   return { accountId, accessKeyId, secretAccessKey, bucket };
