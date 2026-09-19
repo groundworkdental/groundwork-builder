@@ -65,10 +65,16 @@ async function main() {
     const msgs = await listMessages({ query: flags.query || 'is:unread', max: Number(flags.max || 20) });
     if (!msgs.length) { console.log('nothing matching.'); return; }
     console.log('');
+    const me = (process.env.GMAIL_USER || '').toLowerCase();
     for (const { id } of msgs) {
       const m = await getMessage(id);
-      const { slug, reason } = await routeToAccount(m.from);
-      console.log(`  ${id}  ${slug ? slug.padEnd(16) : '(unrouted)'.padEnd(16)} ${line(m.subject, 58)}`);
+      // Our own replies route by recipient — see ingest() for why.
+      const mine = String(m.from).toLowerCase().includes(me);
+      const { slug, reason } = mine
+        ? await routeToAccount(m.to)
+        : await routeToAccount(m.from);
+      const dir = mine ? '→' : '←';
+      console.log(`  ${id} ${dir} ${slug ? slug.padEnd(16) : '(unrouted)'.padEnd(16)} ${line(m.subject, 56)}`);
       console.log(`  ${' '.repeat(id.length)}  ${line(m.from, 40)}${slug ? '' : `  — ${reason}`}`);
     }
     console.log('');
@@ -81,7 +87,10 @@ async function main() {
       max: Number(flags.max || 20),
       markSeen: !!flags.markRead,
     });
-    for (const m of r.logged) console.log(`  logged    ${m.slug.padEnd(16)} ${line(m.subject, 58)}`);
+    for (const m of r.logged) {
+      const arrow = m.direction === 'out' ? '→' : '←';
+      console.log(`  logged ${arrow}  ${m.slug.padEnd(16)} ${line(m.subject, 56)}`);
+    }
     for (const m of r.skipped) console.log(`  already   ${''.padEnd(16)} ${line(m.subject, 58)}`);
     for (const m of r.unrouted) {
       console.log(`  UNROUTED  ${''.padEnd(16)} ${line(m.subject, 58)}`);
