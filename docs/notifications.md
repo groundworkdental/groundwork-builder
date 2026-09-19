@@ -1,4 +1,23 @@
-# Telegram — the interrupt channel
+# Reaching a human — terminal, email, Telegram
+
+## Channels
+
+Three, tried in order, all optional:
+
+| | reaches you | setup |
+|---|---|---|
+| `terminal` | at the machine, instantly | none — macOS notification + stdout |
+| `email` | the phone you already carry | none beyond Gmail, which is already wired |
+| `telegram` | a stream separate from your inbox | a bot token |
+
+`NOTIFY_CHANNELS=terminal,email` picks and orders them. Unset means every
+channel that has credentials.
+
+Email is the best default: it reaches a phone through an app you already open,
+with no new account, and it is the one channel that works whether or not you
+are at the desk. Terminal is the best companion to it — free, instant, and
+silent when you are not there. Telegram earns its place only once alerts would
+otherwise compete with client mail for your attention.
 
 ## What it is for
 

@@ -254,3 +254,20 @@ export async function send({ slug, to, subject, body, inReplyTo = null, threadId
   });
   return res;
 }
+
+/**
+ * Mail to ourselves, for notifications rather than client correspondence.
+ *
+ * Separate from send() on purpose. send() refuses without approval and writes
+ * a `communication` event, both of which are right for a message to a client
+ * and wrong for one to the operator: an internal alert is not a conversation
+ * with a practice, and filing it as one would put our own alerts on a client's
+ * timeline.
+ */
+export async function notifySelf({ subject, body }) {
+  const { subject: me } = settings();
+  return api('/messages/send', {
+    method: 'POST',
+    body: { raw: mime({ to: me, from: me, subject, body, inReplyTo: null }) },
+  });
+}
