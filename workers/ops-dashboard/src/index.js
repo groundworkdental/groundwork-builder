@@ -187,7 +187,7 @@ async function serveUI(env) {
     const [untriaged, unrouted, proposals, recent] = await Promise.all([
       env.DB.prepare("SELECT id, slug, occurred_at, summary, actor FROM client_events WHERE kind = 'change' AND systemic IS NULL ORDER BY occurred_at DESC LIMIT 50").all(),
       env.DB.prepare("SELECT id, slug, occurred_at, summary, actor FROM client_events WHERE kind = 'change' AND systemic = 'yes' AND (routed_to IS NULL OR routed_to = '') ORDER BY occurred_at DESC LIMIT 50").all(),
-      env.DB.prepare("SELECT id, slug, occurred_at, summary, detail FROM client_events WHERE kind = 'decision' AND summary LIKE 'PROPOSAL:%' AND (routed_to IS NULL OR routed_to = '') ORDER BY occurred_at DESC LIMIT 50").all(),
+      env.DB.prepare("SELECT id, slug, occurred_at, summary, detail FROM client_events WHERE kind = 'decision' AND (routed_to IS NULL OR routed_to = '') ORDER BY occurred_at DESC LIMIT 50").all(),
       env.DB.prepare("SELECT id, slug, occurred_at, kind, direction, summary, actor FROM client_events ORDER BY occurred_at DESC LIMIT 40").all(),
     ]);
     queue = {

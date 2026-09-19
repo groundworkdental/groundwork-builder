@@ -101,7 +101,9 @@ kinds: ${EVENT_KINDS.join(', ')}`);
     if (untriaged.length) {
       console.log(`\nNEEDS A DECISION (${untriaged.length})\n`);
       for (const e of untriaged) {
-        const kind = e.kind === 'decision' ? 'proposal' : 'triage';
+        const kind = e.kind !== 'decision' ? 'triage'
+          : /^ASK:/.test(e.summary) ? 'ASK'
+            : /^PROPOSAL:/.test(e.summary) ? 'proposal' : 'decision';
         console.log(`  ${short(e.id)}  ${when(e.occurred_at)}  [${kind}]  ${e.slug}  ${e.summary}`);
       }
     }

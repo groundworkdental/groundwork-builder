@@ -91,15 +91,22 @@ export async function timeline(slug, { limit = 200 } = {}) {
 export async function openTriage({ slug = null } = {}) {
   const where = slug ? 'AND slug = ?' : '';
   const params = slug ? [slug] : [];
-  // Proposals are decisions, not changes, and were missing from this query —
-  // so a router proposal showed on the dashboard queue and not in `log open`.
-  // Two surfaces disagreeing about what needs a human is the one thing this
-  // ledger exists to prevent.
+  // What counts as "open" is defined once, by SHAPE rather than by listing
+  // the kinds that happen to exist today.
+  //
+  // This query has now been wrong twice for the same reason. It first matched
+  // only kind = 'change', so router proposals were invisible here while
+  // showing on the dashboard. Adding 'PROPOSAL:%' fixed proposals and missed
+  // asks, which are the most urgent thing in the system — a question that is
+  // blocking work — and were delivered to Telegram while showing nowhere.
+  //
+  // A decision is open when nothing has been routed for it. That covers
+  // PROPOSAL, ASK, and whatever the next kind turns out to be, without this
+  // query needing to learn about it.
   const untriaged = await d1Query(
     `SELECT * FROM client_events
       WHERE ((kind = 'change' AND systemic IS NULL)
-          OR (kind = 'decision' AND summary LIKE 'PROPOSAL:%'
-              AND (routed_to IS NULL OR routed_to = '')))
+          OR (kind = 'decision' AND (routed_to IS NULL OR routed_to = '')))
         ${where}
       ORDER BY occurred_at ASC`,
     params,
