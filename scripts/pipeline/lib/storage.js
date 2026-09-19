@@ -22,8 +22,6 @@
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-const GCS_BUCKET  = process.env.GOOGLE_CLOUD_STORAGE_BUCKET || 'builder-data';
-const GCS_PROJECT = process.env.GOOGLE_CLOUD_PROJECT        || 'groundwork-dental';
 
 let _gcsClient  = null;
 let _gcsEnabled = null; // null = not yet checked
@@ -32,67 +30,35 @@ let _gcsEnabled = null; // null = not yet checked
 // GCS client — lazy init, credential-method auto-detect
 // ---------------------------------------------------------------------------
 
-async function getGcsClient() {
-  if (_gcsEnabled === false) return null;
-  if (_gcsClient) return _gcsClient;
+/**
+ * Remote uploads go to R2. Everything writes locally first regardless, so a
+ * missing or misconfigured bucket degrades to "local only" rather than losing
+ * a run's artifacts — which is what happened for weeks when the GCS
+ * credentials silently vanished from .env and nothing complained.
+ */
+let _warned = false;
 
-  try {
-    const { Storage } = await import('@google-cloud/storage');
-
-    // Method 1: Inline JSON credentials from env (preferred for hosted environments)
-    const inlineJson = process.env.GOOGLE_CLOUD_CREDENTIALS_JSON;
-    if (inlineJson) {
-      let credentials;
-      try {
-        credentials = JSON.parse(inlineJson);
-      } catch {
-        console.warn('  [storage] GOOGLE_CLOUD_CREDENTIALS_JSON is not valid JSON — skipping GCS');
-        _gcsEnabled = false;
-        return null;
-      }
-      _gcsClient = new Storage({ projectId: GCS_PROJECT, credentials });
-      _gcsEnabled = true;
-      return _gcsClient;
-    }
-
-    // Method 2: File path via GOOGLE_APPLICATION_CREDENTIALS (ADC)
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      _gcsClient = new Storage({ projectId: GCS_PROJECT });
-      _gcsEnabled = true;
-      return _gcsClient;
-    }
-
-    // No credentials configured — local-only mode
-    _gcsEnabled = false;
-    return null;
-
-  } catch (err) {
-    console.warn(`  [storage] GCS init failed: ${err.message} — local-only mode`);
-    _gcsEnabled = false;
-    return null;
-  }
+function mimeFor(key) {
+  return key.endsWith('.json') ? 'application/json'
+    : key.endsWith('.html') ? 'text/html'
+    : key.endsWith('.txt') ? 'text/plain'
+    : /\.(jpg|jpeg)$/i.test(key) ? 'image/jpeg'
+    : key.endsWith('.png') ? 'image/png'
+    : key.endsWith('.webp') ? 'image/webp'
+    : key.endsWith('.avif') ? 'image/avif'
+    : 'application/octet-stream';
 }
 
-// ---------------------------------------------------------------------------
-// Core primitives
-// ---------------------------------------------------------------------------
-
-/**
- * Write content to local path (always) and GCS (when configured, non-blocking).
- *
- * @param {string} gcsPath   - GCS object key, e.g. "springs-dental/runs/20260425/01-bronze.json"
- * @param {string|Buffer} content
- * @param {string} localPath - Absolute local file path
- */
 export async function storageWrite(gcsPath, content, localPath) {
   // Always write locally first
   await mkdir(dirname(localPath), { recursive: true });
   const buf = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
   await writeFile(localPath, buf);
 
-  // GCS — fire-and-forget (non-blocking)
-  gcsUpload(gcsPath, buf).catch(err =>
-    console.warn(`  [storage] GCS upload failed (${gcsPath}): ${err.message}`)
+  // R2 — fire and forget. A failed upload must never fail a build: the
+  // artifact is already on disk and the run has more useful work to do.
+  remoteUpload(gcsPath, buf).catch((err) =>
+    console.warn(`  [storage] R2 upload failed (${gcsPath}): ${err.message}`),
   );
 }
 
@@ -101,28 +67,22 @@ export async function storageWrite(gcsPath, content, localPath) {
  * Non-blocking.
  */
 export function storageUpload(gcsPath, localPath) {
-  return gcsUpload(gcsPath, localPath, true).catch(err =>
-    console.warn(`  [storage] GCS upload failed (${gcsPath}): ${err.message}`)
+  return remoteUpload(gcsPath, localPath, true).catch((err) =>
+    console.warn(`  [storage] R2 upload failed (${gcsPath}): ${err.message}`),
   );
 }
 
-async function gcsUpload(gcsPath, content, isFilePath = false) {
-  const client = await getGcsClient();
-  if (!client) return;
-
-  const file = client.bucket(GCS_BUCKET).file(gcsPath);
-  const mimeType = gcsPath.endsWith('.json') ? 'application/json'
-    : gcsPath.endsWith('.html') ? 'text/html'
-    : gcsPath.match(/\.(jpg|jpeg)$/i) ? 'image/jpeg'
-    : gcsPath.endsWith('.png') ? 'image/png'
-    : gcsPath.endsWith('.webp') ? 'image/webp'
-    : 'application/octet-stream';
-
-  if (isFilePath) {
-    await file.upload(content, { metadata: { contentType: mimeType } });
-  } else {
-    await file.save(content, { metadata: { contentType: mimeType } });
+async function remoteUpload(key, content, isFilePath = false) {
+  const { r2Configured, r2Put } = await import('./r2.js');
+  if (!r2Configured()) {
+    if (!_warned) {
+      console.warn('  [storage] R2 not configured — artifacts are local only');
+      _warned = true;
+    }
+    return;
   }
+  const body = isFilePath ? await readFile(content) : content;
+  await r2Put(key, body, mimeFor(key));
 }
 
 export async function storageRead(localPath) {
@@ -165,11 +125,15 @@ export function createRunStorage(clientSlug, runId) {
       return storageUpload(`${prefix}/design-trace.html`, localPath);
     },
 
-    /** GCS path prefix for this run (useful for linking in reports) */
+    /**
+     * Object-key prefix for this run. Still called gcsPrefix because callers
+     * and the D1 `gcs_run_folder` column use that name; renaming it is a
+     * separate change from moving the bucket.
+     */
     gcsPrefix: prefix,
 
-    /** Public-ish GCS console URL for this run */
-    gcsUrl: `https://console.cloud.google.com/storage/browser/${GCS_BUCKET}/${prefix}`,
+    /** Where to look at this run's artifacts. */
+    gcsUrl: `https://dash.cloudflare.com/?to=/:account/r2/default/buckets/${process.env.R2_BUCKET || 'groundwork-builder-data'}`,
   };
 }
 
@@ -178,7 +142,7 @@ export function createRunStorage(clientSlug, runId) {
 // ---------------------------------------------------------------------------
 
 /**
- * Write a design library fingerprint to GCS.
+ * Write a design library fingerprint to remote storage.
  * Called by distill-design.js after saving locally.
  */
 export async function libraryWrite(slug, content, localPath) {
@@ -186,17 +150,23 @@ export async function libraryWrite(slug, content, localPath) {
 }
 
 /**
- * Check if GCS is configured and reachable.
- * Returns { enabled: bool, bucket, project }
+ * Is remote storage configured, and does it answer?
+ *
+ * `reachable` does a real round trip rather than trusting that credentials
+ * exist. Configured-but-broken is the state that cost weeks of silently
+ * local-only runs.
  */
-export async function storageStatus() {
-  const client = await getGcsClient();
+export async function storageStatus({ probe = false } = {}) {
+  const { r2Configured, r2Check } = await import('./r2.js');
+  const enabled = r2Configured();
+  let reachable = null;
+  if (enabled && probe) {
+    reachable = await r2Check().catch(() => false);
+  }
   return {
-    enabled: !!client,
-    bucket:  GCS_BUCKET,
-    project: GCS_PROJECT,
-    method:  process.env.GOOGLE_CLOUD_CREDENTIALS_JSON ? 'inline-json'
-           : process.env.GOOGLE_APPLICATION_CREDENTIALS ? 'file-path'
-           : 'none',
+    enabled,
+    reachable,
+    backend: 'r2',
+    bucket: process.env.R2_BUCKET || 'groundwork-builder-data',
   };
 }

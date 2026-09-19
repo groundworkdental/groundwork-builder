@@ -743,12 +743,12 @@ async function main() {
     }).catch(() => {});
   }
 
-  // Log GCS status once
-  const gcsStatus = await storageStatus();
-  if (gcsStatus.enabled) {
-    console.log(`[Storage] GCS enabled → gs://${gcsStatus.bucket}/${runStorage.gcsPrefix}/`);
+  // Log remote storage status once
+  const storage = await storageStatus();
+  if (storage.enabled) {
+    console.log(`[Storage] R2 → ${storage.bucket}/${runStorage.gcsPrefix}/`);
   } else {
-    console.log(`[Storage] Local only (set GOOGLE_CLOUD_CREDENTIALS_JSON to enable GCS)`);
+    console.log('[Storage] Local only — set R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY to upload');
   }
   console.log('');
 
