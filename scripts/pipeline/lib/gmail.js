@@ -78,12 +78,23 @@ function bodyOf(payload) {
 
 /** Trim a reply chain to what is actually new. */
 export function topOfThread(body) {
-  const cut = body.search(/^(On .+ wrote:|-----Original Message-----|_{10,}|From:\s.+@)/m);
-  if (cut === -1) return body.replace(/\n{3,}/g, '\n\n').trim();
-  const head = body.slice(0, cut).replace(/\n{3,}/g, '\n\n').trim();
-  // A message that is ONLY a quoted chain has nothing above the marker. Keep
-  // the whole thing rather than filing an empty row; an arbitrary character
-  // threshold here silently dropped real two-line replies.
+  // Drop quoted lines first. A client replying inline quotes our own earlier
+  // message back at us with ">" prefixes, and everything downstream then reads
+  // our words as theirs: the router found "coming soon" and "TBD" in three
+  // messages and raised proposals about scaffold text reaching a client, when
+  // the client was quoting an email in which we described fixing exactly that.
+  // Evidence drawn from your own prior sentence is not evidence.
+  const unquoted = body
+    .split('\n')
+    .filter((l) => !/^\s*>/.test(l))
+    .join('\n');
+
+  const cut = unquoted.search(/^(On .+ wrote:|-----Original Message-----|_{10,}|From:\s.+@)/m);
+  const trimmed = cut === -1 ? unquoted : unquoted.slice(0, cut);
+  const head = trimmed.replace(/\n{3,}/g, '\n\n').trim();
+
+  // A message that is ONLY quotation has nothing of its own. Keep the original
+  // rather than filing an empty row.
   return head.length ? head : body.replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -157,6 +168,7 @@ export async function routeToAccount(fromHeader) {
  * wearing a timestamp.
  */
 export async function ingest({ query = 'is:unread', max = 20, markSeen = false } = {}) {
+  const { subject: me } = settings();
   const results = { logged: [], skipped: [], unrouted: [] };
   for (const { id } of await listMessages({ query, max })) {
     const msg = await getMessage(id);
@@ -166,13 +178,22 @@ export async function ingest({ query = 'is:unread', max = 20, markSeen = false }
     );
     if (seen.length) { results.skipped.push(msg); continue; }
 
-    const { slug, reason } = await routeToAccount(msg.from);
-    if (!slug) { results.unrouted.push({ ...msg, reason }); continue; }
+    // A thread contains our own replies as well as theirs. Routing those by
+    // SENDER files them as unrouted mail from a stranger, when they are in
+    // fact our side of a conversation we already know the practice for — so
+    // route our own messages by recipient, and record them as outbound.
+    const mine = String(msg.from).toLowerCase().includes(String(me).toLowerCase());
+    const { slug, reason } = mine
+      ? await routeToAccount(msg.to)
+      : await routeToAccount(msg.from);
+    const direction = mine ? 'out' : 'in';
+
+    if (!slug) { results.unrouted.push({ ...msg, reason, direction }); continue; }
 
     await logEvent({
       slug,
       kind: 'communication',
-      direction: 'in',
+      direction,
       actor: msg.from.slice(0, 200),
       summary: msg.subject.slice(0, 300),
       detail: msg.body.slice(0, 16_000),
@@ -181,7 +202,7 @@ export async function ingest({ query = 'is:unread', max = 20, markSeen = false }
         ? new Date(msg.date).toISOString() : null,
     });
     if (markSeen) await markRead(id);
-    results.logged.push({ ...msg, slug, reason });
+    results.logged.push({ ...msg, slug, reason, direction });
   }
   return results;
 }
